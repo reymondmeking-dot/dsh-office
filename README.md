@@ -6,6 +6,37 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 
 ---
 
+## 截图 / Screenshots
+
+**像素办公室：任务全流程实时上演 / The pixel office: the whole pipeline acted out live**
+
+| 中文 | English |
+|---|---|
+| ![中文办公室界面](docs/images/office-zh.jpg) | ![English office](docs/images/office-en.jpg) |
+
+**新任务（可拖入附件）/ New task (drag in attachments)**
+
+| 中文 | English |
+|---|---|
+| ![新建任务-中文](docs/images/task-zh.jpg) | ![New task - English](docs/images/task-en.jpg) |
+
+**设置：服务商、模型果子、思考强度 / Settings: providers, model fruits, thinking effort**
+
+| 中文 | English |
+|---|---|
+| ![设置-中文](docs/images/settings-zh.jpg) | ![Settings - English](docs/images/settings-en.jpg) |
+
+**服务商编辑：协议、Base URL、每模型输入/输出上限 / Provider editor: protocol, base URL, per-model token limits**
+
+| 中文 | English |
+|---|---|
+| ![服务商编辑-中文](docs/images/provider-zh.jpg) | ![Provider editor - English](docs/images/provider-en.jpg) |
+
+> 截图使用演示配置（`api.example.com` 假数据），界面内不显示真实 API Key。
+> Screenshots use demo data (`api.example.com`); the UI never shows raw API keys.
+
+---
+
 ## 功能 / Features
 
 **中文**
