@@ -65,10 +65,11 @@ mv "$DIST_APP/Contents/MacOS/$BUNDLE_EXE" "$DIST_APP/Contents/MacOS/$APP"
 /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string icon.icns" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "$PLIST" 2>/dev/null || true
 
-# ---- icon.icns from the shipped PNG (sips + iconutil ship with macOS) ----
+# ---- icon.icns from a crisp 1024px render (sips + iconutil ship with macOS) ----
 ICONSET="$ROOT/dist/icon-$ARCH.iconset"
 rm -rf "$ICONSET"; mkdir -p "$ICONSET"
-SRC="$ROOT/app/icon.png"
+SRC="$ROOT/dist/icon-src-1024.png"
+node "$ROOT/scripts/make-icon.cjs" /tmp/dsh-office-icon.ico "$SRC" 1024
 for spec in "16 icon_16x16.png" "32 icon_16x16@2x.png" "32 icon_32x32.png" "64 icon_32x32@2x.png" \
             "128 icon_128x128.png" "256 icon_128x128@2x.png" "256 icon_256x256.png" "512 icon_256x256@2x.png" \
             "512 icon_512x512.png" "1024 icon_512x512@2x.png"; do

@@ -45,4 +45,6 @@ let offset = 6 + 16 * sizes.length
 const dir = sizes.map((s, i) => { const e = Buffer.alloc(16); e[0] = s === 256 ? 0 : s; e[1] = s === 256 ? 0 : s; e.writeUInt16LE(1, 4); e.writeUInt16LE(32, 6); e.writeUInt32LE(imgs[i].length, 8); e.writeUInt32LE(offset, 12); offset += imgs[i].length; return e })
 fs.writeFileSync(process.argv[2], Buffer.concat([header, ...dir, ...imgs]))
 fs.writeFileSync(process.argv[2].replace(/\.ico$/, '.png'), imgs[sizes.length - 1])
+// optional crisp pixel-perfect large PNG: node make-icon.cjs icon.ico out.png 1024
+if (process.argv[3]) fs.writeFileSync(process.argv[3], render(Number(process.argv[4]) || 1024))
 console.log('icon written')
