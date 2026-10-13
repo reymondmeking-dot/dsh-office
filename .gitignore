@@ -1,0 +1,14 @@
+# build output and local caches
+dist/
+tmp/
+*.log
+
+# dependencies (the app ships with no npm dependencies)
+node_modules/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

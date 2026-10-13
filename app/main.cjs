@@ -1,0 +1,804 @@
+// DSH Office — Electron main process: window, settings, project archive, and the
+// CEO → HR → meeting → work → report → archive orchestration over DSH runtimes.
+'use strict'
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
+const fs = require('node:fs')
+const path = require('node:path')
+const os = require('node:os')
+const crypto = require('node:crypto')
+const { RuntimePool, writeProfile } = require('./runtime.cjs')
+const prov = require('./providers.cjs')
+const agents = require('./agents.cjs')
+const I18N = require('./renderer/i18n.js')
+const T = (k, v) => I18N.t(k, v)
+const jn = a => a.join(I18N.getLang() === 'en' ? ', ' : '、')
+
+// On Linux the Chromium SUID sandbox is unavailable when running as root
+// (Docker/CI) or without unprivileged user namespaces; fall back automatically.
+if (process.platform === 'linux' && (process.env.DSH_OFFICE_NO_SANDBOX === '1' || (() => { try { return typeof process.getuid === 'function' && process.getuid() === 0 } catch { return false } })())) {
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+}
+
+const USER = app.getPath('userData')
+const SETTINGS_FILE = path.join(USER, 'settings.json')
+const STATE_FILE = path.join(USER, 'office-state.json')
+const LOG_FILE = path.join(USER, 'office.log')
+const HARNESS_DIR = path.join(USER, 'harness')
+
+/** Where a DSH (deepseek-harness) checkout normally lives on each platform. */
+function defaultDshRoot() {
+  const home = os.homedir()
+  const cands = process.platform === 'win32'
+    ? ['D:\\deepseek-harness', 'C:\\deepseek-harness', path.join(home, 'deepseek-harness')]
+    : ['/opt/deepseek-harness', path.join(home, 'deepseek-harness'), path.join(home, 'deepseek', 'harness'), '/srv/deepseek-harness']
+  for (const c of cands) { try { if (fs.existsSync(path.join(c, 'package.json'))) return c } catch {} }
+  for (const c of cands) { try { if (fs.existsSync(c)) return c } catch {} }
+  return process.platform === 'win32' ? cands[0] : path.join(home, 'deepseek-harness')
+}
+
+const DEFAULT_SETTINGS = {
+  workspace: path.join(os.homedir(), 'Documents', 'DSH Office'),
+  dshRoot: defaultDshRoot(),
+  nodePath: '',
+  proxyPort: 19828,
+  permissionMode: 'workspace-write',
+  defaultModel: '',
+  defaultEffort: 'medium',
+  normalConcurrency: 3,
+  minTeam: 2,
+  maxTeam: 5,
+  // No built-in API configuration: the user adds providers/models in Settings.
+  providers: {},
+  models: [],
+}
+const NO_MODEL_MSG = () => T('err.noModel')
+/** Default per-request output cap used to sanity-check a model entry. */
+const DEFAULT_CONTEXT_WINDOW = 200000
+
+function log(msg) {
+  try { fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`) } catch {}
+}
+function readJson(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) } catch { return fallback }
+}
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8')
+}
+
+let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_FILE, {}) }
+for (const m of settings.models) if (!Array.isArray(m.efforts)) m.efforts = ['off', 'low', 'medium', 'high']
+const projectsDir = () => path.join(settings.workspace, 'projects')
+
+// ---------- harness ----------
+function ensureHarness() {
+  fs.mkdirSync(HARNESS_DIR, { recursive: true })
+  const norm = s => s.replace(/\r\n/g, '\n').trim()
+  for (const f of ['ceo.md', 'hr.md', 'employee.md']) {
+    const dst = path.join(HARNESS_DIR, f), src = path.join(__dirname, 'harness', f)
+    if (!fs.existsSync(dst)) { fs.copyFileSync(src, dst); continue }
+    // upgrade untouched copies of an older shipped version; keep the user's own edits
+    const cur = norm(fs.readFileSync(dst, 'utf8')), ship = norm(fs.readFileSync(src, 'utf8'))
+    if (cur === ship) continue
+    const legacy = path.join(__dirname, 'harness', 'legacy', f)
+    if (fs.existsSync(legacy) && norm(fs.readFileSync(legacy, 'utf8')) === cur) {
+      fs.copyFileSync(dst, `${dst}.v1.bak`); fs.copyFileSync(src, dst); log(`harness ${f} upgraded to v2`)
+    }
+  }
+}
+function harness(name, vars) {
+  let t = fs.readFileSync(path.join(HARNESS_DIR, `${name}.md`), 'utf8')
+  for (const [k, v] of Object.entries(vars)) t = t.replaceAll(`{{${k}}}`, String(v))
+  const self = (name === 'ceo' || name === 'hr') && agent(name)
+  if (self) t += `\n\n（你在办公室里的名字是「${self.name}」。${name === 'ceo' ? `HR 叫「${agent('hr')?.name}」` : `CEO 叫「${agent('ceo')?.name}」`}。）`
+  return t
+}
+
+// ---------- office state (agents) ----------
+const state = readJson(STATE_FILE, null) || {
+  agents: [
+    { id: 'ceo', role: 'ceo', name: '乔老板', title: 'CEO', model: null, look: { hair: 1, shirt: 0 } },
+    { id: 'hr', role: 'hr', name: '安娜', title: 'HR 总监', model: null, look: { hair: 2, shirt: 1 } },
+  ],
+  rush: false,
+}
+state.agents = state.agents.filter(a => a.role !== 'employee') // staff leave between app launches
+for (const a of state.agents) { a.status = 'idle'; a.activity = '' }
+const saveState = () => writeJson(STATE_FILE, { agents: state.agents.map(({ log: _l, ...a }) => a), rush: state.rush })
+const agent = id => state.agents.find(a => a.id === id)
+const modelOf = a => (a.model && settings.models.some(m => m.key === a.model)) ? a.model : settings.defaultModel
+/** Thinking effort an agent runs with: its own pick, else the office default, clamped to what the model offers. */
+function effortOf(a) {
+  const m = settings.models.find(x => x.key === modelOf(a))
+  const offered = m?.efforts?.length ? m.efforts : null
+  const want = a.effort || settings.defaultEffort || null
+  if (!offered) return null
+  if (want && offered.includes(want)) return want
+  // nearest offered level at or below the wish, else the lowest thinking level
+  const L = prov.THINKING_LEVELS, wi = L.indexOf(want)
+  const below = offered.filter(e => L.indexOf(e) <= wi).sort((x, y) => L.indexOf(y) - L.indexOf(x))
+  return below[0] || offered[0]
+}
+
+let win
+const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload) }
+const emit = (type, data = {}) => send('office:event', { type, ...data, t: Date.now() })
+function setAgent(id, patch) {
+  const a = agent(id); if (!a) return
+  Object.assign(a, patch)
+  if (patch.activity) { a.log = [...(a.log || []), { t: Date.now(), text: patch.activity }].slice(-40) }
+  send('office:agent', publicAgent(a))
+  clearTimeout(setAgent.t); setAgent.t = setTimeout(saveState, 1500) // keep office-state.json in step with live status
+}
+const publicAgent = a => ({ ...a, effectiveModel: modelOf(a), effectiveEffort: effortOf(a) })
+
+// ---------- runtime ----------
+let pool
+function initPool() {
+  writeProfile(settings)
+  pool = new RuntimePool(settings, log)
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const pace = ms => sleep(state.rush ? ms / 3 : ms)
+
+function toolLabel(name, args) {
+  let a = {}
+  try { a = JSON.parse(args || '{}') } catch {}
+  const file = a.file_path || a.path || a.pattern || ''
+  const base = file ? path.basename(String(file)) : ''
+  const map = {
+    write: T('tool.write', { name: base }), edit: T('tool.edit', { name: base }), read: T('tool.read', { name: base }),
+    glob: T('tool.glob'), grep: T('tool.grep'),
+    pwsh: T('tool.shell'), bash: T('tool.shell'), web_search: T('tool.webSearch'), web_fetch: T('tool.webFetch'), todo_write: T('tool.todo'),
+    skill: T('tool.skill'), subagent: T('tool.subagent'), read_image: T('tool.image'),
+  }
+  return map[name] || T('tool.other', { name })
+}
+
+async function runAgent(a, sessionTag, prompt, rush) {
+  const rt = pool.get(modelOf(a), rush, effortOf(a))
+  const sessionId = `${a.id}-${sessionTag}-${crypto.randomBytes(4).toString('hex')}`
+  const text = await rt.run(sessionId, prompt, ev => {
+    if (ev.type === 'tool/call') setAgent(a.id, { activity: toolLabel(ev.data.name, ev.data.arguments) })
+    else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('typing', { id: a.id })
+  })
+  return text
+}
+
+function parseJson(text) {
+  const s = text.indexOf('{'); const e = text.lastIndexOf('}')
+  if (s < 0 || e <= s) throw new Error('no JSON object')
+  return JSON.parse(text.slice(s, e + 1))
+}
+
+// ---------- projects ----------
+function slug(s) {
+  return (String(s).replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 28)) || 'project'
+}
+function stamp() {
+  const d = new Date(); const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+const projectFile = dir => path.join(dir, '.office', 'project.json')
+function saveProject(p) { writeJson(projectFile(p.dir), p) }
+
+function listProjects() {
+  const root = projectsDir()
+  if (!fs.existsSync(root)) return []
+  return fs.readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory())
+    .map(d => readJson(projectFile(path.join(root, d.name)), null)).filter(Boolean)
+    .sort((a, b) => b.createdAt - a.createdAt)
+}
+
+function listFiles(dir) {
+  const out = []
+  const walk = (d, rel) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === '.office' || e.name === 'node_modules' || e.name.startsWith('.git')) continue
+      const full = path.join(d, e.name); const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) { if (out.length < 400) walk(full, r) } else {
+        const st = fs.statSync(full); out.push({ rel: r, path: full, size: st.size, mtime: st.mtimeMs })
+      }
+    }
+  }
+  try { walk(dir, '') } catch {}
+  return out
+}
+
+const queue = []
+let current = null
+
+// plain recursive copy (fs.cpSync crashed the Electron main process)
+async function copyDir(from, to) {
+  await fs.promises.mkdir(to, { recursive: true })
+  for (const e of await fs.promises.readdir(from, { withFileTypes: true })) {
+    const a = path.join(from, e.name), b = path.join(to, e.name)
+    if (e.isDirectory()) await copyDir(a, b); else if (e.isFile()) await fs.promises.copyFile(a, b)
+  }
+}
+/** Copy the boss's dropped files/folders into <project>/附件/ and return their records. */
+async function copyAttachments(dir, list) {
+  const out = []
+  const src = [...new Set([].concat(list || []).map(String).filter(Boolean))]
+  if (!src.length) return out
+  const dest = path.join(dir, '附件'); fs.mkdirSync(dest, { recursive: true })
+  for (const s of src) {
+    try {
+      const st = fs.statSync(s)
+      const base = path.basename(s)
+      let name = base, n = 1
+      while (fs.existsSync(path.join(dest, name))) { const e = path.extname(base); name = `${path.basename(base, e)} (${++n})${e}` }
+      const to = path.join(dest, name)
+      if (st.isDirectory()) await copyDir(s, to); else await fs.promises.copyFile(s, to)
+      const size = st.isDirectory() ? listFiles(to).reduce((a, f) => a + f.size, 0) : st.size
+      out.push({ name, from: s, path: to, rel: `附件/${name}`, dir: st.isDirectory(), size })
+    } catch (err) { log(`attachment ${s} failed: ${err}`); out.push({ name: path.basename(s), from: s, error: String(err.message || err) }) }
+  }
+  return out
+}
+const fmtSize = b => b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB` : b >= 1 << 20 ? `${(b / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
+
+async function submitTask(input) {
+  if (!settings.models?.length) throw new Error(NO_MODEL_MSG())
+  const createdAt = Date.now()
+  const name = `${stamp()}-${slug(input.title)}`
+  const dir = path.join(projectsDir(), name)
+  fs.mkdirSync(path.join(dir, '.office'), { recursive: true })
+  const p = {
+    id: name, title: input.title, brief: input.brief || '', rush: !!input.rush, dir, rel: `projects/${name}`, continueOf: input.continueOf || null,
+    createdAt, status: 'queued', phase: '排队中', team: [], assignments: [], reports: [], summary: '', color: Math.floor(Math.random() * 8),
+  }
+  p.attachments = await copyAttachments(dir, input.attachments)
+  saveProject(p)
+  queue.push(p)
+  emit('project', { project: p })
+  if (input.rush && !state.rush) setRush(true)
+  pump()
+  return p
+}
+
+async function pump() {
+  if (current || !queue.length) return
+  current = queue.shift()
+  try { await runProject(current) } catch (err) {
+    log(`project ${current.id} failed: ${err.stack || err}`)
+    current.status = 'failed'; current.phase = `失败：${String(err.message || err).slice(0, 120)}`
+    saveProject(current); emit('project', { project: current })
+    emit('say', { id: 'ceo', text: T('say.projectFail'), ms: 6000 })
+    setAgent('ceo', { status: 'idle', activity: T('act.projectFailed') })
+  } finally {
+    current = null
+    pump()
+  }
+}
+
+function phase(p, status, text) {
+  p.status = status; p.phase = text; saveProject(p); emit('project', { project: p })
+}
+
+async function runProject(p) {
+  const vars = { projectDir: p.dir, projectRel: p.rel }
+  const rush = () => state.rush || p.rush
+  const rushNote = () => rush() ? '\n\n【加急项目】老板要求加急：全员快速模式，抓重点，尽快交付可用成果。' : ''
+
+  // previous staff leave
+  const leaving = state.agents.filter(a => a.role === 'employee')
+  if (leaving.length) {
+    emit('dismiss', { ids: leaving.map(a => a.id) })
+    state.agents = state.agents.filter(a => a.role !== 'employee'); saveState()
+    await pace(2500)
+  }
+
+  // 0. "continue" an archived project: hand its folder + summary to everyone
+  const prev = p.continueOf ? listProjects().find(x => x.id === p.continueOf) : null
+  const prevNote = prev ? `\n\n## 这是续作\n本项目接着已归档项目「${prev.title}」继续做。旧项目目录：${prev.dir}\n旧项目总结：${(prev.summary || '（无）').slice(0, 1500)}\n旧项目的成果文件可以直接读取、复用；新成果写到本项目目录。` : ''
+  const qaNote = () => p.qa?.length ? `\n\n## 老板的补充说明（CEO 提问、老板回答）\n${p.qa.map(x => `- 问：${x.q}\n  答：${x.a || '（老板未回答，按合理假设处理并写明）'}`).join('\n')}` : ''
+  const okAtt = (p.attachments || []).filter(a => !a.error)
+  const attNote = okAtt.length ? `\n\n## 老板提供的附件（已复制到项目目录，请按需阅读/使用，不要修改原件）\n${okAtt.map(a => `- ${a.path}${a.dir ? '（文件夹）' : ''}，${fmtSize(a.size)}`).join('\n')}\nPDF、Word、表格、图片、音视频等可以用合适的工具或命令行读取、转写或抽帧；读不了的格式要在交付里说明。` : ''
+  const taskText = () => `标题：${p.title}\n描述：${p.brief || '（无更多描述）'}${attNote}${prevNote}${qaNote()}${rushNote()}`
+
+  // 1. CEO sets the goal
+  phase(p, 'goal', 'CEO 制定目标')
+  setAgent('ceo', { status: 'busy', activity: T('act.newTask', { title: p.title }) })
+  emit('say', { id: 'ceo', text: T('say.newTask', { title: p.title }), ms: 2500 })
+  emit('work-start', { id: 'ceo' })
+  const goalPrompt = `${harness('ceo', vars)}
+
+## 现在：制定目标
+老板的任务：
+${taskText()}
+
+请明确本项目的目标、交付范围和验收标准，交给 HR 去招人分工。${prev ? '可以先读旧项目目录了解进度。' : '需要时可以查看工作区里的相关文件。'}
+输出严格 JSON：
+{"goal":"一段话的项目目标","scope":["交付物1","交付物2"],"acceptance":["验收标准1","验收标准2"],"toHr":"一句话交代给 HR 的话"}`
+  const askRule = `
+
+## 不清楚可以先问老板
+如果任务里有关键信息不清楚、会明显影响成果方向，而且无法从工作区或旧项目里查到（例如：指代不明的编号/名称、目标受众、交付格式、风格、篇幅、截止要求），你可以先向老板提问，而不是瞎猜。
+- 最多 3 个问题，每个问题具体、好回答，尽量给出 2~4 个选项。
+- 能合理假设的小事不要问。
+- 要提问时只输出：{"questions":[{"q":"问题","options":["选项A","选项B"]}]}
+- 不需要提问时，直接输出目标 JSON。`
+  let goal
+  try {
+    let out = parseJson(await runAgent(agent('ceo'), 'goal', goalPrompt + (settings.ceoAsk === false ? '' : askRule), rush()))
+    const qs = [].concat(out.questions || []).map(q => typeof q === 'string' ? { q } : q).filter(q => q && q.q).slice(0, 3)
+    if (!out.goal && qs.length) {
+      phase(p, 'asking', 'CEO 在向老板提问')
+      setAgent('ceo', { status: 'idle', activity: T('act.asking', { n: qs.length }) })
+      const answers = await askUser(p, qs.map(q => ({ q: String(q.q), options: [].concat(q.options || []).map(String).slice(0, 5) })))
+      p.qa = qs.map((q, i) => ({ q: String(q.q), a: String(answers?.[i] || '').trim() })); saveProject(p)
+      emit('say', { id: 'ceo', text: answers ? T('say.thanks') : T('say.assume'), ms: 2500 })
+      setAgent('ceo', { status: 'busy', activity: T('act.makingGoal') })
+      phase(p, 'goal', 'CEO 制定目标')
+      out = parseJson(await runAgent(agent('ceo'), 'goal2', `${harness('ceo', vars)}
+
+## 现在：制定目标
+老板的任务：
+${taskText()}
+
+请明确本项目的目标、交付范围和验收标准。不要再提问。
+输出严格 JSON：
+{"goal":"一段话的项目目标","scope":["交付物1","交付物2"],"acceptance":["验收标准1","验收标准2"],"toHr":"一句话交代给 HR 的话"}`, rush()))
+    }
+    goal = out
+    if (!goal.goal) throw new Error('empty goal')
+  } catch (err) {
+    log(`CEO goal fallback: ${err}`)
+    goal = { goal: `${p.title}：${p.brief || ''}`, scope: [], acceptance: ['成果文件齐全、可直接使用'], toHr: '按任务招人分工吧。' }
+  }
+  goal.scope = [].concat(goal.scope || []).map(String); goal.acceptance = [].concat(goal.acceptance || []).map(String)
+  p.goal = goal; saveProject(p)
+  const goalText = `目标：${goal.goal}\n交付范围：\n${goal.scope.map(s => `- ${s}`).join('\n') || '- （未列出）'}\n验收标准：\n${goal.acceptance.map(s => `- ${s}`).join('\n')}`
+
+  // CEO walks to HR with the brief
+  phase(p, 'hiring', 'CEO 把目标交给 HR')
+  setAgent('ceo', { status: 'busy', activity: T('act.givenToHr') })
+  emit('summon-hr', { project: p.id, title: p.title, text: goal.toHr })
+  await pace(4500)
+  setAgent('ceo', { status: 'idle', activity: T('act.waitAccept') })
+
+  // 2. HR hires + divides work + schedules
+  setAgent('hr', { status: 'busy', activity: T('act.hrPlanning') })
+  emit('hr-hiring', {})
+  const hrPrompt = `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+
+## 本次任务
+${taskText()}
+
+## CEO 定的目标
+${goalText}
+
+请招人并分工排期。输出格式（严格 JSON）：
+{"team":[{"name":"员工中文名","title":"职位","skills":"核心技能","task":"详细子任务：做什么、交付什么、质量标准","deliverable":"主交付文件名，如 02-市场调研.md","after":["必须等哪些同事完成（填名字），没有则 []"]}],"note":"一句话说明招聘与排期思路","kickoff":"一句开工会开场白"}`
+  let team, hrPlan = {}
+  const hrStart = Date.now()
+  try {
+    hrPlan = parseJson(await runAgent(agent('hr'), 'hire', hrPrompt, rush()))
+    team = (hrPlan.team || []).slice(0, settings.maxTeam)
+    if (!team.length) throw new Error('empty team')
+    if (hrPlan.note) emit('say', { id: 'hr', text: hrPlan.note, ms: 5000 })
+  } catch (err) {
+    log(`HR fallback: ${err}`)
+    team = [
+      { name: '小研', title: '研究员', skills: '调研、分析', task: `围绕「${p.title}」做调研与分析`, deliverable: '01-调研分析.md', after: [] },
+      { name: '小创', title: '执行专员', skills: '方案落地、写作', task: `基于调研产出「${p.title}」的主要成果`, deliverable: '02-主要成果.md', after: ['小研'] },
+    ]
+  }
+  await sleep(Math.max(0, (state.rush ? 800 : 2500) - (Date.now() - hrStart)))
+  const hires = team.map((m, i) => ({
+    id: `emp-${crypto.randomBytes(3).toString('hex')}`, role: 'employee', name: String(m.name || T('emp.fallback', { n: i + 1 })).slice(0, 12),
+    title: String(m.title || T('emp.titleFallback')).slice(0, 24), skills: String(m.skills || ''), duty: String(m.task || m.duty || ''), task: String(m.task || m.duty || ''),
+    deliverable: String(m.deliverable || `${String(i + 1).padStart(2, '0')}-${slug(m.title || 'result')}.md`).replace(/[\\/]/g, '-'),
+    model: null, status: 'idle', activity: T('act.newcomer'), look: { hair: Math.floor(Math.random() * 6), shirt: Math.floor(Math.random() * 10), skin: Math.floor(Math.random() * 3) },
+    project: p.id, _after: [].concat(m.after || []).map(String),
+  }))
+  // resolve "after" names → ids; drop unknown names, self-refs and cycles
+  const byName = new Map(hires.map(h => [h.name, h.id]))
+  const origName = new Map(team.map((m, i) => [String(m.name || ''), hires[i].id]))
+  for (const h of hires) h.deps = [...new Set(h._after.map(n => byName.get(n) || origName.get(n) || (hires.find(x => x.id === n)?.id)).filter(id => id && id !== h.id))]
+  const cyclic = () => { const seen = new Set(), stack = new Set(); const visit = id => { if (stack.has(id)) return true; if (seen.has(id)) return false; seen.add(id); stack.add(id); const r = hires.find(x => x.id === id).deps.some(visit); stack.delete(id); return r }; return hires.some(h => visit(h.id)) }
+  if (cyclic()) { log('HR schedule has a cycle; ignoring deps'); for (const h of hires) h.deps = [] }
+  for (const h of hires) delete h._after
+  state.agents.push(...hires); saveState()
+  const nameOf = id => hires.find(h => h.id === id)?.name || id
+  p.team = hires.map(({ id, name, title, skills, duty, deliverable }) => ({ id, name, title, skills, duty, deliverable }))
+  p.assignments = hires.map(h => ({ id: h.id, name: h.name, title: h.title, task: h.task, deliverable: h.deliverable, after: h.deps.map(nameOf) }))
+  phase(p, 'hiring', `HR 招到 ${hires.length} 人`)
+  setAgent('hr', { status: 'busy', activity: T('act.hrHired', { n: hires.length }) })
+  emit('hired', { agents: hires.map(publicAgent) })
+  await pace(5500)
+
+  // 3. Kick-off meeting, run by HR
+  phase(p, 'meeting', 'HR 主持开工会')
+  emit('meeting-start', { ids: ['ceo', 'hr', ...hires.map(h => h.id)], title: p.title, host: 'hr' })
+  const meetStart = Date.now()
+  await pace(2500)
+  emit('say', { id: 'ceo', text: `🎯 ${goal.goal.slice(0, 70)}`, ms: 4000 })
+  await pace(2500)
+  emit('say', { id: 'hr', text: hrPlan.kickoff || T('say.kickoffFallback'), ms: 3500 })
+  for (const h of hires) {
+    await pace(1500)
+    const wait = h.deps.length ? T('meet.waitDeps', { names: jn(h.deps.map(nameOf)) }) : T('meet.startNow')
+    emit('say', { id: 'hr', text: `@${h.name}：${h.task.slice(0, 60)}${h.task.length > 60 ? '…' : ''}${wait}`, ms: 3800 })
+    emit('say', { id: h.id, text: h.deps.length ? T('say.waitUpstream') : T('say.gotIt'), ms: 1800, delay: 1500 })
+  }
+  saveProject(p)
+  await sleep(Math.max(0, (state.rush ? 2500 : 7000) - (Date.now() - meetStart)))
+  emit('say', { id: 'hr', text: T('say.meetingEnd'), ms: 2500 })
+  await pace(1800)
+  emit('meeting-end', { ids: ['ceo', 'hr', ...hires.map(h => h.id)] })
+  setAgent('hr', { status: 'idle', activity: T('act.hrWaiting') })
+  for (const h of hires) if (h.deps.length) setAgent(h.id, { status: 'idle', activity: T('act.waitDeps', { names: jn(h.deps.map(nameOf)) }) })
+  await pace(3500)
+
+  // 4. Work in dependency order; HR reviews every report, may send it back
+  phase(p, 'working', '员工按排期开工')
+  const MAX_REWORK = rush() ? 1 : 2
+  const approved = new Map() // id -> final report record
+  const parseStatus = text => {
+    const first = (text || '').trim().split('\n')[0]
+    if (/受阻/.test(first)) return 'blocked'
+    if (/部分完成/.test(first)) return 'partial'
+    if (/完成/.test(first)) return 'done'
+    return 'done'
+  }
+  const handoff = h => h.deps.length ? `\n\n## 上游交接（已通过 HR 审核）\n${h.deps.map(id => { const r = approved.get(id); return `### ${r.name}（${r.title}）→ ${p.rel}/${r.deliverable}\n${r.report}` }).join('\n\n')}\n\n请先阅读上游成果文件，与之保持一致。` : ''
+  const reviewPrompt = (h, rec, round) => `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+
+## 现在：审核汇报
+项目目标：
+${goalText}
+
+员工：${h.name}（${h.title}）
+分配的子任务：${h.task}
+主交付文件：${p.rel}/${h.deliverable}
+第 ${round + 1} 次提交，自报状态：${rec.status}
+员工汇报：
+${rec.report}
+
+请检查项目目录中的成果（只读，不要改文件），判断是否通过。${round >= MAX_REWORK ? '这已经是最后一次机会，除非完全不可用，否则请判定通过并把遗留问题写进意见。' : ''}
+输出严格 JSON：{"pass":true,"comment":"一句话审核意见（不通过时写清要改什么）"}`
+
+  const work = async h => {
+    let feedback = ''
+    for (let round = 0; ; round++) {
+      setAgent(h.id, { status: 'busy', activity: round ? T('act.rework', { n: round }) : T('act.startWork') })
+      emit('work-start', { id: h.id })
+      const prompt = `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}
+
+## 项目
+${taskText()}
+
+## 项目目标（CEO）
+${goalText}
+
+## 团队分工（供参考，只做你自己的部分）
+${p.assignments.map(x => `- ${x.name}（${x.title}）：${x.task} → ${x.deliverable}${x.after.length ? `（在 ${x.after.join('、')} 之后）` : ''}`).join('\n')}
+
+## 你的子任务（HR 分配）
+${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，修改已有文件即可）\n${feedback}` : ''}
+
+请直接开始工作，把成果写入 ${p.rel}/${h.deliverable}。`
+      let report, ok = true
+      try { report = await runAgent(h, round ? `rework${round}` : 'work', prompt, rush()) } catch (err) { ok = false; report = `状态：受阻\n出错了：${String(err.message || err).slice(0, 300)}` }
+      report = (report || '状态：完成\n已完成。').trim()
+      const rec = { id: h.id, name: h.name, title: h.title, ok, status: ok ? parseStatus(report) : 'blocked', report, deliverable: h.deliverable, round, at: Date.now() }
+
+      // walk to HR and report
+      setAgent(h.id, { status: 'reporting', activity: T('act.goReport') })
+      emit('report', { id: h.id, to: 'hr', text: report.replace(/^状态：\S+\s*/, ''), status: rec.status, ok })
+      setAgent('hr', { status: 'busy', activity: T('act.hrReviewing', { name: h.name }) })
+      let verdict
+      try {
+        verdict = parseJson(await runAgent(agent('hr'), `review-${h.name}-${round}`, reviewPrompt(h, rec, round), rush()))
+      } catch (err) { log(`HR review fallback: ${err}`); verdict = { pass: true, comment: '（审核失败，默认通过）' } }
+      const pass = verdict.pass !== false || round >= MAX_REWORK
+      rec.review = { pass, comment: String(verdict.comment || '') }
+      p.reports.push(rec); saveProject(p)
+      emit('review', { id: h.id, by: 'hr', pass, comment: rec.review.comment, round })
+      setAgent('hr', { status: 'idle', activity: pass ? T('act.reviewPass', { name: h.name }) : T('act.reviewFail', { name: h.name }) })
+      await pace(7000)
+      if (pass) {
+        approved.set(h.id, rec)
+        setAgent(h.id, { status: 'idle', activity: rec.status === 'done' ? T('act.reviewPass', { name: h.name }) : T('act.reviewPassWarn', { status: rec.status === 'blocked' ? T('st.blocked') : T('st.partial') }) })
+        phase(p, 'working', `已通过 ${approved.size}/${hires.length}`)
+        return
+      }
+      feedback = rec.review.comment
+    }
+  }
+  const limit = () => rush() ? hires.length : Math.max(1, settings.normalConcurrency)
+  await new Promise(resolve => {
+    const running = new Set(), started = new Set()
+    const next = () => {
+      for (const h of hires) {
+        if (running.size >= limit()) break
+        if (started.has(h.id) || !h.deps.every(d => approved.has(d))) continue
+        started.add(h.id)
+        const job = work(h).catch(err => {
+          log(`work ${h.id} crashed: ${err.stack || err}`)
+          approved.set(h.id, { id: h.id, name: h.name, title: h.title, ok: false, status: 'blocked', report: '流程异常', deliverable: h.deliverable })
+        }).finally(() => { running.delete(job); next() })
+        running.add(job)
+      }
+      if (!running.size && started.size === hires.length) resolve()
+    }
+    next()
+  })
+
+  // 5. CEO acceptance
+  phase(p, 'integrating', 'CEO 验收成果')
+  setAgent('hr', { status: 'busy', activity: T('act.submitting') })
+  emit('handover', { from: 'hr', to: 'ceo' })
+  await pace(5000)
+  setAgent('hr', { status: 'idle', activity: T('act.submitted') })
+  setAgent('ceo', { status: 'busy', activity: T('act.accepting') })
+  emit('work-start', { id: 'ceo' })
+  const finals = hires.map(h => approved.get(h.id)).filter(Boolean)
+  const tag = s => ({ done: '完成', partial: '部分完成', blocked: '受阻' })[s] || s
+  const finalPrompt = `${harness('ceo', vars)}
+
+## 现在：最终验收
+老板的任务：
+${taskText()}
+
+你定的目标：
+${goalText}
+
+HR 审核后的员工交付：
+${finals.map(r => `### ${r.name}（${r.title}）· ${tag(r.status)}${r.review ? ` · HR 意见：${r.review.comment}` : ''}\n交付文件：${p.rel}/${r.deliverable}\n${r.report}`).join('\n\n')}
+
+请：
+1. 按验收标准逐条检查项目目录 ${p.rel} 里的成果，只做小修（衔接、错字、格式），不要重做员工的工作。
+2. 写出 ${p.rel}/00-项目总结.md：项目目标、团队与分工、每份成果的要点与文件链接、验收结论（逐条标注达标/未达标）、遗留问题与后续建议。
+3. 最后一条回复用 3 句话向老板汇报，第一句写验收结论。`
+  let summary
+  try { summary = await runAgent(agent('ceo'), 'final', finalPrompt, rush()) } catch (err) { summary = `验收失败：${err.message || err}` }
+  p.summary = (summary || '').trim()
+  emit('say', { id: 'ceo', text: p.summary.slice(0, 80) || T('say.done'), ms: 6000 })
+  setAgent('ceo', { status: 'busy', activity: T('act.archiving') })
+  emit('archive', { id: 'ceo', project: p.id })
+  await pace(6000)
+  p.files = listFiles(p.dir).length
+  p.finishedAt = Date.now()
+  phase(p, 'done', '已验收归档')
+  setAgent('ceo', { status: 'idle', activity: T('act.archived', { title: p.title }) })
+  emit('celebrate', {})
+}
+
+// ---------- CEO → 老板 提问 ----------
+let pendingAsk = null
+function askUser(p, questions) {
+  return new Promise(resolve => {
+    pendingAsk = { project: p.id, title: p.title, questions, resolve }
+    emit('ask', { project: p.id, title: p.title, questions })
+  })
+}
+
+function setRush(on) {
+  state.rush = !!on; saveState()
+  emit('rush', { on: state.rush })
+}
+
+// ---------- IPC ----------
+ipcMain.handle('office:init', () => ({
+  settings, agents: state.agents.map(publicAgent), rush: state.rush,
+  projects: listProjects(), current: current?.id || null, queue: queue.map(q => q.id),
+  ask: pendingAsk && { project: pendingAsk.project, title: pendingAsk.title, questions: pendingAsk.questions },
+}))
+ipcMain.handle('office:answer', (_e, answers) => {
+  const a = pendingAsk; if (!a) return false
+  pendingAsk = null; emit('ask-done', { project: a.project, skipped: !answers })
+  a.resolve(answers || null); return true
+})
+ipcMain.handle('office:submit', (_e, input) => submitTask(input))
+ipcMain.handle('office:rush', (_e, on) => { setRush(on); return state.rush })
+ipcMain.handle('office:setModel', (_e, id, key) => {
+  const a = agent(id); if (!a) return null
+  a.model = key || null; saveState()
+  setAgent(id, { activity: T('act.modelChange', { model: settings.models.find(m => m.key === modelOf(a))?.name }) })
+  return publicAgent(a)
+})
+ipcMain.handle('office:setDefaultEffort', (_e, effort) => {
+  settings.defaultEffort = effort; writeJson(SETTINGS_FILE, settings)
+  for (const a of state.agents) send('office:agent', publicAgent(a))
+  return settings
+})
+ipcMain.handle('office:setEffort', (_e, id, effort) => {
+  const a = agent(id); if (!a) return null
+  a.effort = effort || null; saveState()
+  const effText = lvl => T('effort.' + lvl)
+  setAgent(id, { activity: a.effort ? T('act.effort', { text: effText(effortOf(a)) || effortOf(a) }) : T('act.effortFollow', { text: effText(effortOf(a)) || '—' }) })
+  return publicAgent(a)
+})
+// ---- providers (DSH Models-page semantics) ----
+const providerRefs = () => Object.entries(settings.providers || {}).map(([route, p]) => p.apiKeyEnv || prov.deriveKeyRef(route))
+/** A key typed by the user wins; otherwise reuse the secret an agent scan located. */
+const keyFor = (req = {}) => (req.apiKey || '').trim() || (req.keyFrom ? agents.secretOf(req.keyFrom) : null) || null
+ipcMain.handle('office:providerInfo', () => ({
+  protocols: prov.PROTOCOLS, levels: prov.THINKING_LEVELS,
+  keys: prov.keyStatus(settings.dshRoot, providerRefs()),
+  dsh: (() => { try { return prov.dshProviders(settings.dshRoot) } catch (e) { log(`dshProviders: ${e.message}`); return [] } })(),
+}))
+/** Scan every agent runtime on this machine for API configuration (keys stay in main). */
+ipcMain.handle('office:scanAgents', () => {
+  const started = Date.now()
+  const result = agents.scan()
+  result.configured = Object.entries(settings.providers || {}).map(([route, p]) => ({ route, apiKeyEnv: p.apiKeyEnv, baseURL: p.baseURL }))
+  // A record is importable when its key is embedded in the scan OR its env ref
+  // already exists in ~/.dsh/.credentials.yaml (e.g. a non-office DSH profile).
+  const refs = new Set(providerRefs())
+  for (const r of result.records) if (r.keyEnv) refs.add(r.keyEnv)
+  result.hasKey = {}
+  for (const ref of refs) { try { result.hasKey[ref] = !!prov.storedKey(settings.dshRoot, ref) } catch { result.hasKey[ref] = false } }
+  result.dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  log(`scanAgents: ${result.records.length} records from ${result.sources.length} sources in ${Date.now() - started}ms`)
+  return result
+})
+ipcMain.handle('office:testModel', async (_e, req) => {
+  const ref = req.apiKeyEnv || (req.route && prov.ROUTE_PATTERN.test(req.route) ? prov.deriveKeyRef(req.route) : '')
+  const apiKey = keyFor(req) || (ref ? prov.storedKey(settings.dshRoot, ref) : undefined)
+  const { net } = require('electron')
+  return prov.testModel((url, init) => net.fetch(url, init), { baseURL: req.baseURL, api: req.api, apiKey, model: req.model })
+})
+ipcMain.handle('office:rename', (_e, id, name) => {
+  const a = agent(id); if (!a) return null
+  const n = String(name || '').trim().slice(0, 12)
+  if (!n || n === a.name) return publicAgent(a)
+  const old = a.name; a.name = n; saveState()
+  setAgent(id, { activity: T('act.rename', { old, n }) })
+  return publicAgent(a)
+})
+ipcMain.handle('office:discover', async (_e, req) => {
+  const route = req.route
+  const ref = req.apiKeyEnv || (route ? prov.deriveKeyRef(route) : '')
+  const apiKey = keyFor(req) || (ref ? prov.storedKey(settings.dshRoot, ref) : undefined)
+  const { net } = require('electron')
+  return prov.discover((url, init) => net.fetch(url, init), { baseURL: req.baseURL, api: req.api, apiKey })
+})
+/** `env:FOO_API_KEY` style refs are valid; anything else must be an env-var identifier. */
+function assertRef(ref) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new Error(T('err.invalidRef', { ref }))
+  return ref
+}
+ipcMain.handle('office:setLang', (_e, lang) => { I18N.setLang(lang); return I18N.getLang() })
+ipcMain.handle('office:saveProvider', async (_e, route, p, apiKey, models) => {
+  if (current) throw new Error(T('err.projectBusy'))
+  if (!prov.ROUTE_PATTERN.test(route)) throw new Error(T('err.routePattern'))
+  if (!p.existing && settings.providers?.[route]) throw new Error(T('err.routeExists', { route }))
+  if (!/^https?:\/\/\S+$/.test(p.baseURL || '')) throw new Error(T('err.baseHttp'))
+  if (!prov.PROTOCOLS.includes(p.api)) throw new Error(T('err.protocol'))
+  if (!Array.isArray(models) || !models.length) throw new Error(T('err.needModel'))
+  const ids = new Set()
+  for (const m of models) {
+    if (!m.model) throw new Error(T('err.modelEmpty'))
+    if (ids.has(m.model)) throw new Error(T('err.modelDup', { model: m.model }))
+    ids.add(m.model)
+    const ctx = Number(m.contextWindow) || 0, out = Number(m.maxTokens) || 0
+    if (ctx && !Number.isFinite(ctx)) throw new Error(T('err.ctxNumber', { model: m.model }))
+    if (out && (!Number.isInteger(out) || out < 1)) throw new Error(T('err.outInt', { model: m.model }))
+    if (ctx && out && out >= ctx) throw new Error(T('err.outLessCtx', { model: m.model, out, ctx }))
+  }
+  const apiKeyEnv = assertRef(settings.providers?.[route]?.apiKeyEnv || p.apiKeyEnv || prov.deriveKeyRef(route))
+  // The key arrives as a positional argument; a one-click agent import may
+  // instead reference a secret the scan cached (keyFrom), never sent to the UI.
+  const incoming = (apiKey || '').trim() || (p.keyFrom ? agents.secretOf(p.keyFrom) : null)
+  if (incoming) prov.setKey(settings.dshRoot, apiKeyEnv, incoming)
+  else if (!prov.storedKey(settings.dshRoot, apiKeyEnv)) throw new Error(T('err.needKey'))
+  const used = new Set(settings.models.filter(m => m.provider !== route).map(m => m.key))
+  const clean = models.map(m => {
+    let key = m.key && !used.has(m.key) ? m.key : `${route}-${m.model}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+    while (used.has(key)) key += '-2'
+    used.add(key)
+    return {
+      key, name: (m.name || m.model).trim(), provider: route, model: m.model.trim(),
+      contextWindow: Number(m.contextWindow) > 0 ? Math.floor(Number(m.contextWindow)) : DEFAULT_CONTEXT_WINDOW,
+      maxTokens: Number(m.maxTokens) > 0 ? Math.floor(Number(m.maxTokens)) : 0,
+      fruit: m.fruit || 'apple', fastModel: (m.fastModel || '').trim(),
+      efforts: prov.THINKING_LEVELS.filter(l => (m.efforts || []).includes(l)),
+    }
+  })
+  settings.providers = { ...settings.providers, [route]: { displayName: p.displayName || route, apiKeyEnv, api: p.api, baseURL: p.baseURL.trim() } }
+  const before = settings.models.findIndex(m => m.provider === route)
+  const others = settings.models.filter(m => m.provider !== route)
+  settings.models = before < 0 ? [...others, ...clean] : [...others.slice(0, before), ...clean, ...others.slice(before)]
+  if (!settings.models.some(m => m.key === settings.defaultModel)) settings.defaultModel = settings.models[0].key
+  writeJson(SETTINGS_FILE, settings)
+  await pool.configure(settings)
+  for (const a of state.agents) send('office:agent', publicAgent(a))
+  return settings
+})
+ipcMain.handle('office:deleteProvider', async (_e, route) => {
+  if (current) throw new Error(T('err.projectBusy'))
+  const rest = settings.models.filter(m => m.provider !== route)
+  const { [route]: _gone, ...others } = settings.providers || {}
+  settings.providers = others; settings.models = rest
+  if (!rest.some(m => m.key === settings.defaultModel)) settings.defaultModel = rest[0]?.key || ''
+  writeJson(SETTINGS_FILE, settings)
+  await pool.configure(settings)
+  for (const a of state.agents) send('office:agent', publicAgent(a))
+  return settings
+})
+ipcMain.handle('office:projects', () => listProjects())
+ipcMain.handle('office:files', (_e, id) => {
+  const p = listProjects().find(x => x.id === id); if (!p) return []
+  return listFiles(p.dir)
+})
+ipcMain.handle('office:readFile', (_e, file) => {
+  const root = path.resolve(projectsDir())
+  const full = path.resolve(file)
+  if (!full.startsWith(root)) throw new Error('outside projects')
+  const st = fs.statSync(full)
+  if (st.size > 2_000_000) return { tooLarge: true }
+  const buf = fs.readFileSync(full)
+  if (buf.includes(0)) return { binary: true }
+  return { text: buf.toString('utf8') }
+})
+ipcMain.handle('office:open', (_e, p) => shell.openPath(p))
+ipcMain.handle('office:reveal', (_e, p) => shell.showItemInFolder(p))
+ipcMain.handle('office:harnessDir', () => shell.openPath(HARNESS_DIR))
+ipcMain.handle('office:harness', (_e, name) => fs.readFileSync(path.join(HARNESS_DIR, `${name}.md`), 'utf8'))
+ipcMain.handle('office:saveHarness', (_e, name, text) => {
+  if (!['ceo', 'hr', 'employee'].includes(name)) throw new Error('bad harness')
+  fs.writeFileSync(path.join(HARNESS_DIR, `${name}.md`), text, 'utf8'); return true
+})
+ipcMain.handle('office:pickFiles', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'], title: T('dlg.pickAtts') })
+  return r.canceled ? [] : r.filePaths.map(f => { const st = fs.statSync(f); return { path: f, name: path.basename(f), size: st.size, dir: false } })
+})
+ipcMain.handle('office:statPaths', (_e, list) => [].concat(list || []).map(f => { try { const st = fs.statSync(f); return { path: f, name: path.basename(f), size: st.isDirectory() ? 0 : st.size, dir: st.isDirectory() } } catch { return null } }).filter(Boolean))
+ipcMain.handle('office:pickDir', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: settings.workspace })
+  return r.canceled ? null : r.filePaths[0]
+})
+ipcMain.handle('office:saveSettings', async (_e, next) => {
+  if (current) throw new Error(T('err.settingsBusy'))
+  settings = { ...settings, ...next }
+  writeJson(SETTINGS_FILE, settings)
+  fs.mkdirSync(projectsDir(), { recursive: true })
+  await pool.configure(settings)
+  return settings
+})
+ipcMain.handle('office:openLog', () => shell.openPath(LOG_FILE))
+ipcMain.on('win:min', () => win?.minimize())
+ipcMain.on('win:max', () => win?.isMaximized() ? win.unmaximize() : win?.maximize())
+ipcMain.on('win:close', () => win?.close())
+
+// ---------- app ----------
+if (!app.requestSingleInstanceLock()) app.quit()
+app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus() } })
+
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
+  ensureHarness()
+  fs.mkdirSync(projectsDir(), { recursive: true })
+  initPool()
+  // Recover projects interrupted by a previous exit.
+  for (const p of listProjects()) if (!['done', 'failed'].includes(p.status)) { p.status = 'failed'; p.phase = '应用退出时中断'; saveProject(p) }
+  win = new BrowserWindow({
+    width: 1440, height: 900, minWidth: 1100, minHeight: 680, frame: false, backgroundColor: '#1d1f27',
+    title: 'DSH Office', icon: process.platform === 'win32' ? path.join(__dirname, 'icon.ico') : path.join(__dirname, 'icon.png'), show: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: false },
+  })
+  win.once('ready-to-show', () => win.show())
+  win.webContents.on('console-message', (e) => {
+    const lvl = e.level ?? 'info'
+    if (lvl === 'error' || lvl === 'warning' || lvl === 2 || lvl === 3) log(`renderer ${lvl}: ${e.message} @${e.sourceId}:${e.lineNumber}`)
+  })
+  win.webContents.on('render-process-gone', (_e, d) => log(`renderer gone: ${JSON.stringify(d)}`))
+  win.webContents.on('preload-error', (_e, p, err) => log(`preload error ${p}: ${err}`))
+  // a file dropped outside the drop zone must not navigate the app away
+  win.webContents.on('will-navigate', e => e.preventDefault())
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  // Warm the CEO's runtime so the first task starts fast.
+  if (settings.models.length) setTimeout(() => pool.get(modelOf(agent('ceo')), false, effortOf(agent('ceo'))), 1500)
+})
+
+app.on('window-all-closed', async () => {
+  try { await pool?.closeAll() } catch {}
+  app.quit()
+})

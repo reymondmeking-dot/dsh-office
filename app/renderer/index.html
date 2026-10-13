@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<title>DSH Office</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header id="titlebar">
+  <div class="traffic">
+    <button class="tl close" id="btn-close" data-i18n-title="tb.close"></button>
+    <button class="tl min" id="btn-min" data-i18n-title="tb.min"></button>
+    <button class="tl max" id="btn-max" data-i18n-title="tb.max"></button>
+  </div>
+  <div class="brand"><span class="logo">▣</span> DSH Office</div>
+  <div id="fruit-tray" data-i18n-title="tray.title">
+    <span class="tray-label" data-i18n="tray.label"></span>
+    <div id="fruits"></div>
+  </div>
+  <div class="spacer"></div>
+  <div id="status-pill"><span class="dot"></span><span id="status-text" data-i18n="status.idle"></span></div>
+  <div id="effort-pill" data-i18n-title="effort.pill.title"><span>🧠</span><select id="top-effort"></select></div>
+  <button id="btn-rush" class="pill-btn rush" data-i18n="btn.rush" data-i18n-title="btn.rush.title"></button>
+  <button id="btn-ask" class="pill-btn" data-i18n="btn.ask" data-i18n-title="btn.ask.title"></button>
+  <button id="btn-new" class="pill-btn primary" data-i18n="btn.new"></button>
+  <button id="btn-archive" class="icon-btn" data-i18n-title="btn.archive.title">📚</button>
+  <button id="btn-lang" class="pill-btn lang-btn" data-i18n="lang.switch" title="English / 中文"></button>
+  <button id="btn-settings" class="icon-btn" data-i18n-title="btn.settings.title">⚙️</button>
+</header>
+
+<main id="stage">
+  <canvas id="office"></canvas>
+  <div id="bubbles"></div>
+  <div id="tooltip" class="hidden"></div>
+</main>
+
+<aside id="ticker"><div id="ticker-list"></div></aside>
+
+<!-- agent popover -->
+<div id="agent-pop" class="pop hidden">
+  <div class="pop-head">
+    <img id="ap-portrait" alt="" />
+    <div>
+      <div class="name-row"><div id="ap-name" class="h1" data-i18n-title="pop.clickRename"></div><button id="ap-rename" class="icon-btn" data-i18n-title="pop.rename">✎</button></div>
+      <div id="ap-title" class="sub"></div>
+      <div id="ap-status" class="chip"></div>
+    </div>
+    <button class="x" data-close="agent-pop">✕</button>
+  </div>
+  <div class="sec-title" data-i18n="pop.model"></div>
+  <div id="ap-models" class="model-grid"></div>
+  <div class="sec-title" data-i18n="pop.effort"></div>
+  <div id="ap-effort" class="seg"></div>
+  <div id="ap-duty-wrap"><div class="sec-title" data-i18n="pop.duty"></div><div id="ap-duty" class="duty"></div></div>
+  <div class="sec-title" data-i18n="pop.log"></div>
+  <div id="ap-log" class="log"></div>
+  <div id="ap-actions"></div>
+</div>
+
+<!-- new task -->
+<div id="ask-modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheet-head"><div class="h1" data-i18n="ask.head"></div><button class="x" id="ask-later" data-i18n-title="ask.closeTitle">✕</button></div>
+    <div id="ask-sub" class="sub"></div>
+    <div id="ask-list"></div>
+    <div class="sheet-foot"><button id="ask-skip" class="pill-btn" data-i18n="ask.skip"></button><button id="ask-submit" class="pill-btn primary" data-i18n="ask.submit"></button></div>
+  </div>
+</div>
+<div id="drop-overlay" class="hidden"><div data-i18n="drop.hint"></div></div>
+<div id="task-modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheet-head"><div class="h1" data-i18n="task.head"></div><button class="x" data-close="task-modal">✕</button></div>
+    <label><span data-i18n="task.titleLabel"></span><input id="task-title" data-i18n-ph="task.titlePh" maxlength="60" /></label>
+    <label><span data-i18n="task.briefLabel"></span><textarea id="task-brief" rows="6" data-i18n-ph="task.briefPh"></textarea></label>
+    <div class="att-field"><div class="att-label"><span data-i18n="task.att"></span><span class="hint" data-i18n="task.attHint"></span></div>
+      <div id="task-drop" class="drop-zone" tabindex="0"><div id="task-dz-empty" class="dz-empty" data-i18n="task.dropEmpty"></div><div id="task-atts" class="att-list"></div></div>
+    </div>
+    <label><span data-i18n="task.continue"></span><select id="task-continue"><option value="" data-i18n="task.fresh"></option></select></label>
+    <label class="check"><input type="checkbox" id="task-rush" /> <span data-i18n="task.rush"></span></label>
+    <div class="sheet-foot"><button class="pill-btn" data-close="task-modal" data-i18n="task.cancel"></button><button id="task-submit" class="pill-btn primary" data-i18n="task.submit"></button></div>
+  </div>
+</div>
+
+<!-- archive -->
+<div id="archive-modal" class="modal hidden">
+  <div class="sheet wide">
+    <div class="sheet-head"><div class="h1" data-i18n="archive.head"></div><button class="x" data-close="archive-modal">✕</button></div>
+    <div class="archive-body">
+      <div id="bookcase"></div>
+      <div id="book-view" class="hidden">
+        <div class="bv-head">
+          <button id="bv-back" class="pill-btn" data-i18n="archive.back"></button>
+          <div><div id="bv-title" class="h1"></div><div id="bv-meta" class="sub"></div></div>
+          <div class="spacer"></div>
+          <button id="bv-folder" class="pill-btn" data-i18n="archive.reveal"></button>
+        </div>
+        <div class="bv-main">
+          <div id="bv-files"></div>
+          <div id="bv-preview"><div class="empty" data-i18n="archive.pickHint"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- settings -->
+<div id="settings-modal" class="modal hidden">
+  <div class="sheet wide">
+    <div class="sheet-head"><div class="h1" data-i18n="settings.head"></div><button class="x" data-close="settings-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="group">
+        <div class="sec-title" data-i18n="set.files"></div>
+        <div class="row"><input id="set-workspace" /><button id="set-pick" class="pill-btn" data-i18n="set.pick"></button></div>
+        <div class="hint" data-i18n-html="set.filesHint"></div>
+      </div>
+      <div class="group grid2">
+        <label><span data-i18n="set.dshRoot"></span><input id="set-dsh" /></label>
+        <label><span data-i18n="set.proxyPort"></span><input id="set-proxy" type="number" /></label>
+        <label><span data-i18n="set.defaultModel"></span><select id="set-default"></select></label>
+        <label><span data-i18n="set.defaultEffort"></span><select id="set-effort"></select></label>
+        <label><span data-i18n="set.permission"></span><select id="set-perm"><option value="workspace-write" data-i18n="perm.workspace"></option><option value="danger-full-access" data-i18n="perm.full"></option></select></label>
+        <label><span data-i18n="set.concurrency"></span><input id="set-conc" type="number" min="1" max="8" /></label>
+        <label><span data-i18n="set.teamSize"></span><div class="row"><input id="set-min" type="number" min="1" max="8" /><input id="set-max" type="number" min="1" max="8" /></div></label>
+      </div>
+      <div class="group">
+        <div class="sec-title" data-i18n="set.providers"></div>
+        <div class="hint" data-i18n-html="set.providersHint"></div>
+        <div id="set-providers"></div>
+        <div class="row"><button id="set-addprov" class="pill-btn" data-i18n="set.addProvider"></button><button id="set-import" class="pill-btn primary" data-i18n="set.import"></button></div>
+        <div class="hint" data-i18n-html="set.importHint"></div>
+      </div>
+      <div class="group">
+        <div class="sec-title" data-i18n="set.harness"></div>
+        <div class="row"><select id="set-harness"><option value="ceo">CEO 乔老板</option><option value="hr">HR 安娜</option><option value="employee" data-i18n="set.harnessEmployee"></option></select><button id="set-openharness" class="pill-btn" data-i18n="set.openFolder"></button><button id="set-log" class="pill-btn" data-i18n="set.log"></button></div>
+        <textarea id="set-harness-text" rows="10" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <div class="sheet-foot"><span id="set-msg" class="hint"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+  </div>
+</div>
+
+<!-- provider editor -->
+<div id="prov-modal" class="modal hidden">
+  <div class="sheet wide">
+    <div class="sheet-head"><div class="h1" id="pv-head" data-i18n="prov.headAdd"></div><button class="x" data-close="prov-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="group" id="pv-import-wrap">
+        <div class="row"><span class="hint" style="white-space:nowrap" data-i18n="prov.importFromDsh"></span><select id="pv-import"></select></div>
+      </div>
+      <div class="group grid2">
+        <label><span data-i18n="prov.route"></span><input id="pv-route" data-i18n-ph="prov.routePh" spellcheck="false" /></label>
+        <label><span data-i18n="prov.name"></span><input id="pv-name" data-i18n-ph="prov.namePh" /></label>
+        <label><span data-i18n="prov.protocol"></span><select id="pv-api"></select></label>
+        <label><span data-i18n="prov.baseUrl"></span><input id="pv-url" placeholder="https://api.example.com/v1" spellcheck="false" /></label>
+        <label class="span2"><span data-i18n="prov.apiKey"></span><input id="pv-key" type="password" autocomplete="off" spellcheck="false" /><span id="pv-keyhint" class="hint"></span></label>
+      </div>
+      <div class="group">
+        <div class="row"><div class="sec-title" style="margin:0" data-i18n="prov.models"></div><div class="spacer"></div><button id="pv-fetch-apply" class="pill-btn primary" data-i18n="prov.fetchApply" data-i18n-title="prov.fetchApplyTitle"></button><button id="pv-fetch" class="pill-btn" data-i18n="prov.fetch"></button><button id="pv-addmodel" class="pill-btn" data-i18n="prov.addModel"></button></div>
+        <div id="pv-found" class="hidden"></div>
+        <div id="pv-models"></div>
+        <div class="hint" data-i18n-html="prov.limitsHint"></div>
+      </div>
+    </div>
+    <div class="sheet-foot"><span id="pv-msg" class="hint"></span><div class="spacer"></div><button id="pv-del" class="pill-btn danger" data-i18n="prov.del"></button><button class="pill-btn" data-close="prov-modal" data-i18n="prov.cancel"></button><button id="pv-save" class="pill-btn primary" data-i18n="prov.save"></button></div>
+  </div>
+</div>
+
+<!-- one-click import from other agent runtimes / env vars -->
+<div id="imp-modal" class="modal hidden">
+  <div class="sheet wide">
+    <div class="sheet-head"><div class="h1" data-i18n="imp.head"></div><button class="x" data-close="imp-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="group">
+        <div class="row"><span class="hint" id="imp-summary" data-i18n="imp.scanning"></span><div class="spacer"></div><label class="hint" style="white-space:nowrap"><input type="checkbox" id="imp-all" checked /> <span data-i18n="imp.selectAll"></span></label><button id="imp-rescan" class="pill-btn" data-i18n="imp.rescan"></button></div>
+        <div id="imp-hints" class="hint"></div>
+        <div id="imp-list"></div>
+      </div>
+    </div>
+    <div class="sheet-foot"><span id="imp-msg" class="hint"></span><div class="spacer"></div><button class="pill-btn" data-close="imp-modal" data-i18n="imp.cancel"></button><button id="imp-go" class="pill-btn primary" data-i18n="imp.go"></button></div>
+  </div>
+</div>
+
+<div id="drag-ghost" class="hidden"></div>
+<div id="toast" class="hidden"></div>
+
+<script src="i18n.js"></script>
+<script src="sprites.js"></script>
+<script src="office.js"></script>
+<script src="markdown.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
