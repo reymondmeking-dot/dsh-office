@@ -26,7 +26,8 @@ EL_ARCH="darwin-$ARCH"
 ZIP="electron-v${VER}-${EL_ARCH}.zip"
 CACHE="${ELECTRON_CACHE:-$HOME/Library/Caches/electron}"
 APP="DSH Office"
-DIST_APP="$ROOT/dist/$APP-$ARCH.app"
+STAGE_DIR="$ROOT/dist/_stage-$ARCH"
+DIST_APP="$STAGE_DIR/$APP.app"
 OUT_ZIP="$ROOT/dist/DSH-Office-macos-$ARCH.zip"
 OUT_TGZ="$ROOT/dist/DSH-Office-macos-$ARCH.tar.gz"
 MIRROR="${ELECTRON_MIRROR:-https://github.com/electron/electron/releases/download/}"
@@ -39,12 +40,12 @@ if [ ! -f "$CACHE/$ZIP" ]; then
   mv "$CACHE/$ZIP.tmp" "$CACHE/$ZIP"
 fi
 
-rm -rf "$DIST_APP"
-mkdir -p "$(dirname "$DIST_APP")"
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR"
 # unzip keeps the .app bundle structure and symlinks intact
-ditto -x -k "$CACHE/$ZIP" "$ROOT/dist/_extract-$ARCH"
-mv "$ROOT/dist/_extract-$ARCH/Electron.app" "$DIST_APP"
-rm -rf "$ROOT/dist/_extract-$ARCH"
+ditto -x -k "$CACHE/$ZIP" "$STAGE_DIR/_extract"
+mv "$STAGE_DIR/_extract/Electron.app" "$DIST_APP"
+rm -rf "$STAGE_DIR/_extract"
 
 RES="$DIST_APP/Contents/Resources"
 rm -f "$RES/default_app.asar"
@@ -85,7 +86,8 @@ codesign --force --deep --sign - "$DIST_APP" --options runtime 2>/dev/null || co
 # ---- distributables: ditto zip preserves the bundle; tar.gz as a fallback ----
 rm -f "$OUT_ZIP" "$OUT_TGZ"
 ditto -c -k --keepParent "$DIST_APP" "$OUT_ZIP"
-tar -czf "$OUT_TGZ" -C "$ROOT/dist" "$(basename "$DIST_APP")"
+tar -czf "$OUT_TGZ" -C "$STAGE_DIR" "$APP.app"
+rm -rf "$STAGE_DIR"
 
 echo "built ($ARCH):"
 echo "  $DIST_APP"
