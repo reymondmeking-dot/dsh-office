@@ -24,6 +24,7 @@
   <button id="btn-rush" class="pill-btn rush" data-i18n="btn.rush" data-i18n-title="btn.rush.title"></button>
   <button id="btn-ask" class="pill-btn" data-i18n="btn.ask" data-i18n-title="btn.ask.title"></button>
   <button id="btn-new" class="pill-btn primary" data-i18n="btn.new"></button>
+  <button id="btn-chat" class="pill-btn" data-i18n="chat.head" data-i18n-title="btn.chat.title"></button>
   <button id="btn-archive" class="icon-btn" data-i18n-title="btn.archive.title">📚</button>
   <button id="btn-lang" class="pill-btn lang-btn" data-i18n="lang.switch" title="English / 中文"></button>
   <button id="btn-settings" class="icon-btn" data-i18n-title="btn.settings.title">⚙️</button>
@@ -82,6 +83,37 @@
   </div>
 </div>
 
+<!-- project chat: talk to the CEO with context, click deliverables to read them -->
+<div id="chat-modal" class="modal hidden">
+  <div class="sheet wide chat-sheet">
+    <div class="sheet-head">
+      <div class="h1" id="chat-title"></div>
+      <select id="chat-proj" data-i18n-title="chat.pickProject"></select>
+      <div class="spacer"></div>
+      <button id="chat-folder" class="pill-btn" data-i18n="chat.openFolder"></button>
+      <button class="x" data-close="chat-modal">✕</button>
+    </div>
+    <div class="chat-main">
+      <div class="chat-col">
+        <div id="chat-log"></div>
+        <div id="chat-status" class="chat-status hidden"></div>
+        <div class="chat-input">
+          <textarea id="chat-text" rows="2" data-i18n-ph="chat.placeholder"></textarea>
+          <button id="chat-send" class="pill-btn primary" data-i18n="chat.send"></button>
+        </div>
+      </div>
+      <div class="chat-side">
+        <div id="chat-side-list"></div>
+        <div id="chat-side-view" class="hidden">
+          <div class="pv-actions"><button id="cp-back" class="pill-btn" data-i18n="chat.back"></button><button id="cp-open" class="pill-btn" data-i18n="chat.open"></button><button id="cp-reveal" class="pill-btn" data-i18n="chat.reveal"></button></div>
+          <div id="cp-name" class="cp-name"></div>
+          <div id="cp-body"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- archive -->
 <div id="archive-modal" class="modal hidden">
   <div class="sheet wide">
@@ -93,6 +125,7 @@
           <button id="bv-back" class="pill-btn" data-i18n="archive.back"></button>
           <div><div id="bv-title" class="h1"></div><div id="bv-meta" class="sub"></div></div>
           <div class="spacer"></div>
+          <button id="bv-chat" class="pill-btn primary" data-i18n="archive.chat"></button>
           <button id="bv-folder" class="pill-btn" data-i18n="archive.reveal"></button>
         </div>
         <div class="bv-main">
@@ -108,6 +141,7 @@
 <div id="settings-modal" class="modal hidden">
   <div class="sheet wide">
     <div class="sheet-head"><div class="h1" data-i18n="settings.head"></div><button class="x" data-close="settings-modal">✕</button></div>
+    <nav class="settings-jumps" aria-label="Settings"><button class="pill-btn" data-setting-jump="set-workspace" data-i18n="ctx.navGeneral"></button><button class="pill-btn" data-setting-jump="set-providers-section" data-i18n="ctx.navModels"></button><button class="pill-btn" data-setting-jump="context-settings" data-i18n="ctx.navContext"></button><button class="pill-btn" data-setting-jump="set-harness-section" data-i18n="ctx.navHarness"></button></nav>
     <div class="settings-body">
       <div class="group">
         <div class="sec-title" data-i18n="set.files"></div>
@@ -124,19 +158,38 @@
         <label><span data-i18n="set.teamSize"></span><div class="row"><input id="set-min" type="number" min="1" max="8" /><input id="set-max" type="number" min="1" max="8" /></div></label>
       </div>
       <div class="group">
-        <div class="sec-title" data-i18n="set.providers"></div>
+        <div class="sec-title" id="set-providers-section" data-i18n="set.providers"></div>
         <div class="hint" data-i18n-html="set.providersHint"></div>
         <div id="set-providers"></div>
         <div class="row"><button id="set-addprov" class="pill-btn" data-i18n="set.addProvider"></button><button id="set-import" class="pill-btn primary" data-i18n="set.import"></button></div>
         <div class="hint" data-i18n-html="set.importHint"></div>
       </div>
+      <div class="group" id="context-settings">
+        <div class="row parameter-heading"><div class="sec-title" data-i18n="ctx.title"></div><div class="spacer"></div><button id="set-context-recommend" class="pill-btn" data-i18n="ctx.recommend"></button></div>
+        <p class="hint" data-i18n="ctx.intro"></p>
+        <label class="check"><input id="set-compact-auto" type="checkbox" /><span data-i18n="ctx.auto"></span></label>
+        <div class="grid2 parameter-grid">
+          <label><span data-i18n="ctx.threshold"></span><input id="set-compact-threshold" type="number" min="1" max="99" step="1" /><small data-i18n="ctx.thresholdHint"></small></label>
+          <label><span data-i18n="ctx.headroom"></span><input id="set-compact-headroom" type="number" min="0" step="1024" /><small data-i18n="ctx.headroomHint"></small></label>
+          <label><span data-i18n="ctx.summary"></span><input id="set-compact-summary" type="number" min="1" step="1024" /><small data-i18n="ctx.summaryHint"></small></label>
+          <label><span data-i18n="ctx.retain"></span><input id="set-compact-retain" type="number" min="0" max="98" step="1" /><small data-i18n="ctx.retainHint"></small></label>
+        </div>
+        <details class="parameter-advanced"><summary data-i18n="ctx.advanced"></summary><div class="grid2 parameter-grid">
+          <label><span data-i18n="ctx.retries"></span><input id="set-compact-retries" type="number" min="0" max="10" step="1" /></label>
+          <label><span data-i18n="ctx.overflow"></span><input id="set-compact-overflow" type="number" min="0" max="10" step="1" /></label>
+          <label><span data-i18n="ctx.summaryProvider"></span><input id="set-compact-provider" spellcheck="false" data-i18n-ph="ctx.follow" /></label>
+          <label><span data-i18n="ctx.summaryModel"></span><input id="set-compact-model" spellcheck="false" data-i18n-ph="ctx.follow" /></label>
+        </div></details>
+        <div id="context-budget" aria-live="polite"></div>
+        <p class="hint" data-i18n="ctx.applyHint"></p>
+      </div>
       <div class="group">
-        <div class="sec-title" data-i18n="set.harness"></div>
+        <div class="sec-title" id="set-harness-section" data-i18n="set.harness"></div>
         <div class="row"><select id="set-harness"><option value="ceo">CEO 乔老板</option><option value="hr">HR 安娜</option><option value="employee" data-i18n="set.harnessEmployee"></option></select><button id="set-openharness" class="pill-btn" data-i18n="set.openFolder"></button><button id="set-log" class="pill-btn" data-i18n="set.log"></button></div>
         <textarea id="set-harness-text" rows="10" spellcheck="false"></textarea>
       </div>
     </div>
-    <div class="sheet-foot"><span id="set-msg" class="hint"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+    <div class="sheet-foot"><span id="set-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
   </div>
 </div>
 
@@ -188,6 +241,7 @@
 <script src="sprites.js"></script>
 <script src="office.js"></script>
 <script src="markdown.js"></script>
+<script src="../parameters.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

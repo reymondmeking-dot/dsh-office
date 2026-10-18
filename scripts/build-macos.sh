@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # Build DSH Office for macOS (arm64 = Apple Silicon, x64 = Intel).
 # Run ON a macOS machine/runner:
 #   bash scripts/build-macos.sh arm64
 #   bash scripts/build-macos.sh x64
 # The app is ad-hoc signed (no Apple Developer certificate): on first launch
-# the user right-clicks → Open, or runs:  xattr -dr com.apple.quarantine "DSH Office.app"
+# the user right-clicks 鈫?Open, or runs:  xattr -dr com.apple.quarantine "DSH Office.app"
 #
 # Output:
 #   dist/DSH Office-<arch>.app/                 unpacked application
@@ -60,8 +60,8 @@ mv "$DIST_APP/Contents/MacOS/$BUNDLE_EXE" "$DIST_APP/Contents/MacOS/$APP"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName 'DSH Office'" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'DSH Office'" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.dsh.office" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.0" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.0" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.1.0" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.1.0" "$PLIST"
 /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFile" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string icon.icns" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "$PLIST" 2>/dev/null || true

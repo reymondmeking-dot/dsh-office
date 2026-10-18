@@ -14,6 +14,10 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 |---|---|
 | ![中文办公室界面](docs/images/office-zh.jpg) | ![English office](docs/images/office-en.jpg) |
 
+**项目对话：与 CEO 连续对话，点击成果直接查看 / Project chat: talk to the CEO, click a deliverable to read it**
+
+![项目对话窗口](docs/images/chat-zh.jpg)
+
 **新任务（可拖入附件）/ New task (drag in attachments)**
 
 | 中文 | English |
@@ -48,6 +52,7 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 - ⇩ **从其他 Agent 一键导入**：扫描本机的 **DSH、Codex、Claude Code、Hermes、opencode、cc-switch** 配置以及 **环境变量 / `.env`**（如 `DEEPSEEK_API_KEY`），勾选即导入并应用。
 - 🧠 **思考强度**：按模型能力选择 `reasoningEffort` 档位（off/minimal/low/medium/high/xhigh/max），支持全员默认和单人覆盖；⚡加急模式全员快速冲刺。
 - 🗂️ **资料室**：每个完成的项目变成书架上的一本书，可直接预览成果、目标、分工和审核记录。
+- 💬 **项目对话窗口**：任务完成后自动弹出，左侧与 CEO 连续对话（带上下文，可追问、让他修改或补充成果），右侧是成果列表；**总结和主要成果一点就看**，对话里提到的文件也能直接点开，被 CEO 改过的文件会标「已更新」。对话记录保存在项目里，随时可回来继续。
 - 🌏 **中英双语界面**：右上角 `EN/中` 一键切换，即时生效。
 
 **English**
@@ -59,9 +64,31 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 - ⇩ **One-click agent import**: scans local configs from **DSH, Codex, Claude Code, Hermes, opencode, cc-switch** plus **environment variables / `.env`** (e.g. `DEEPSEEK_API_KEY`); tick and import.
 - 🧠 **Thinking effort**: per-model `reasoningEffort` levels (off/minimal/low/medium/high/xhigh/max), with a team default and per-employee override; ⚡ rush mode puts everyone in fast gear.
 - 🗂️ **Archive room**: every finished project becomes a book on the shelf, with previewable deliverables, goal, assignments and review history.
+- 💬 **Project chat window**: pops up when a task finishes. Chat with the CEO with full context (ask follow-ups, have them revise or extend the results) while the right pane lists the deliverables — **click the summary or any main deliverable to read it**, click files mentioned in the conversation, and files the CEO edited are flagged “updated”. Transcripts are saved in the project so you can come back anytime.
 - 🌏 **Bilingual UI (Chinese + English)**: switch instantly with the `EN/中` button in the title bar.
 
 ---
+
+## 上下文、输出与压缩 / Context, output & compaction
+
+在 **设置 → 上下文与压缩** 中调整整个 Office 的自动压缩策略，包括触发比例、额外预留、摘要输出上限、近期原文保留比例、压缩重试、溢出恢复，以及可选的摘要服务商和模型。每个模型的实际触发量会实时显示；保存前会检查窗口、输出、预留和已知模型能力，项目运行期间会拒绝保存设置。
+
+在 **设置 → 模型 → 编辑服务商** 中，可分别调整每个模型的上下文窗口、单次输出上限、模型最大输出能力、思考档位和图片输入。**检测连接与参数** 会发送一条短测试消息，并尝试获取该模型的参数；优先使用服务商返回的数据，再参考精确匹配的本地模型目录或现有配置，并显示来源和检测时间。模型列表不可用不会把成功的连接判成失败。通断测试不验证最大 token 容量，未返回的参数会标明未知；手动值可保留，读取到的声明能力上限不能通过提高请求预算绕过。
+
+| 参数 | 20 万 token 窗口的建议示例 |
+|---|---:|
+| 单次输出预算 | 32,768，且不超过已知输出能力 |
+| 压缩目标比例 | 80% |
+| 额外预留 | 8,192 |
+| 摘要输出上限 | 8,192 |
+| 近期原文保留比例 | 扣除输出后窗口的 16% |
+| 压缩额外尝试 / 溢出恢复 | 1 / 1 |
+
+实际触发量是 `min(窗口 × 触发比例, 窗口 − 单次输出预算 − 额外预留)`。以上示例为 **159,040 token（79.5%）**。建议按配置窗口缩放，并受已知模型输出能力约束；这不是对任何模型真实容量的承诺。旧版本未设置单次输出预算时，会在启动时迁移为明确的建议预算。加急模型有独立模型条目时使用其自己的窗口、输出、思考与图片参数；未独立添加时沿用原模型配置。摘要预算预检按实际触发量估算，单次大量工具结果跨过阈值时仍由 DSH 的运行时溢出恢复处理。
+
+**English:** Under **Settings → Context & compaction**, edit the Office-wide policy and inspect each model's effective trigger. Under a provider's model editor, edit its shared context window, request output budget, declared output capability, reasoning levels, and image support. **Test connection & read limits** probes connectivity and reads exact-model metadata, preferring provider data over a matching local catalog or saved configuration. Missing metadata stays unknown; a successful short probe does not verify maximum capacity. Recommendations scale with the configured window and known output capability. Saving validates budgets in both the renderer and main process. Office writes a final runtime overlay so global Harness defaults cannot silently override the choices saved here.
+
+Offline validation: `node --test scripts/parameters.test.cjs scripts/test-providers.cjs`. Tests use fixtures and do not call a user's model provider.
 
 ## 运行前提 / Requirements
 

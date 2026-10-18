@@ -3,7 +3,7 @@
 ;(async () => {
   const $ = s => document.querySelector(s)
   const O = window.Office, S = window.Sprites, I18N = window.I18N
-  const api = window.office
+  const api = window.office, P = window.OfficeParameters
 
   // ---------- i18n ----------
   let lang = localStorage.getItem('dsh-office-lang') || (navigator.language && navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en')
@@ -27,9 +27,10 @@
     I18N.setLang(lang); api.setLang(lang).catch(() => {})
     applyStaticI18n()
     setStatus(); renderTopEffort(); renderFruits(); fillDefault()
-    if (!$('#settings-modal').classList.contains('hidden')) { renderProviders(); $('#set-harness').options[0].textContent = `CEO ${agents.get('ceo')?.name || ''}`; $('#set-harness').options[1].textContent = `HR ${agents.get('hr')?.name || ''}` }
+    if (!$('#settings-modal').classList.contains('hidden')) { renderProviders(); renderContextBudget(); $('#set-harness').options[0].textContent = `CEO ${agents.get('ceo')?.name || ''}`; $('#set-harness').options[1].textContent = `HR ${agents.get('hr')?.name || ''}` }
     if (!$('#prov-modal').classList.contains('hidden') && pv) { openProvider(pv.existing ? pv.route : null); if (!pv.existing) { $('#pv-route').value = pv.route; $('#pv-url').value = '' } }
     if (!$('#imp-modal').classList.contains('hidden')) renderImport()
+    if (!$('#chat-modal').classList.contains('hidden') && chat) { fillChatProjects(chatable(), chat.id); renderChat() }
     if (popAgent) renderPop()
   }
   applyStaticI18n()
@@ -154,6 +155,7 @@
   setStatus()
 
   // ---------- events from main ----------
+  const seenFinal = new Set(projects.filter(p => ['done', 'failed'].includes(p.status)).map(p => p.id))
   api.onEvent(ev => {
     const h = O.handlers[ev.type]
     if (h) h(ev)
@@ -164,10 +166,21 @@
         O.setProjects(projects); setStatus()
         if (ev.project.status === 'meeting') O.setMeetingTitle(ev.project.title)
         if (ev.project.status === 'done') { O.setMeetingTitle(''); ticker(t('tick.archived', { title: esc(ev.project.title) }), 10000) }
+        if (['done', 'failed'].includes(ev.project.status) && !seenFinal.has(ev.project.id)) {
+          seenFinal.add(ev.project.id)
+          if (ev.project.status === 'done') {
+            $('#btn-chat').classList.add('ping'); toast(t('chat.ready', { title: ev.project.title }), 6000)
+            // the end result of a task is the conversation window: pop it open unless the boss is busy in another dialog
+            const busyModal = [...document.querySelectorAll('.modal')].some(m => !m.classList.contains('hidden'))
+            if (!busyModal) setTimeout(() => { if (![...document.querySelectorAll('.modal')].some(m => !m.classList.contains('hidden'))) openChat(ev.project.id) }, 1800)
+          }
+        }
+        if (!$('#chat-modal').classList.contains('hidden')) fillChatProjects(chatable(), chat?.id)
         if (ev.project.status === 'failed') ticker(t('tick.failed', { title: esc(ev.project.title), phase: esc(tp(ev.project.phase)) }), 12000)
         if (!$('#archive-modal').classList.contains('hidden')) renderBookcase()
         break
       }
+      case 'chat-status': if (chat && chat.id === ev.project && chatSending.has(ev.project)) setChatStatus(ev.text); break
       case 'summon-hr': ticker(t('tick.summonHr', { title: esc(ev.title) })); break
       case 'ask': showAsk(ev); break
       case 'ask-done': hideAsk(); break
@@ -568,6 +581,153 @@
   }
   $('#bv-back').onclick = () => { $('#book-view').classList.add('hidden'); $('#bookcase').classList.remove('hidden'); renderBookcase() }
 
+  // ---------- project chat (talk to the CEO with context; click deliverables to read) ----------
+  let chat = null // { id, title, status, messages, products, sel }
+  const chatSending = new Set()
+  const chatable = () => projects.filter(p => ['done', 'failed'].includes(p.status))
+  const ceoName = () => agents.get('ceo')?.name || 'CEO'
+  const flatProducts = pr => [pr?.summary, ...(pr?.main || []), ...(pr?.others || [])].filter(Boolean)
+  const kb = n => n > 1024 ? `${(n / 1024).toFixed(1)}K` : `${n}B`
+  const fileIco = rel => fileIcon({ name: rel })
+  /** Map a link / mentioned file name from chat text to a real project file. */
+  function findProduct(ref) {
+    if (!chat || !ref) return null
+    let r = String(ref).trim()
+    try { r = decodeURI(r) } catch {}
+    r = r.replace(/\\/g, '/').replace(/^file:\/+/, '').replace(/^\.\//, '').replace(/[#?].*$/, '')
+    const all = flatProducts(chat.products)
+    const base = x => x.split('/').pop()
+    return all.find(f => f.rel === r) || all.find(f => r.endsWith('/' + f.rel)) || all.find(f => f.rel.endsWith('/' + r)) || all.find(f => base(f.rel) === base(r)) || null
+  }
+  function fillChatProjects(list, sel) {
+    $('#chat-proj').innerHTML = list.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? 'selected' : ''}>${p.status === 'failed' ? '✕ ' : '✓ '}${esc(p.title)}</option>`).join('')
+  }
+  async function openChat(id) {
+    const list = chatable()
+    if (id && !list.some(p => p.id === id)) return toast(t('chat.notReady'), 3200)
+    if (!list.length) return toast(projects.length ? t('chat.notReady') : t('chat.noProject'), 3200)
+    const pid = id || (chat && list.some(p => p.id === chat.id) ? chat.id : list[0].id)
+    $('#btn-chat').classList.remove('ping')
+    $('#chat-modal').classList.remove('hidden')
+    fillChatProjects(list, pid)
+    await loadChat(pid)
+    setTimeout(() => $('#chat-text').focus(), 60)
+  }
+  async function loadChat(pid) {
+    const h = await api.chatHistory(pid); if (!h) return
+    chat = { ...h, sel: null }
+    $('#chat-side-view').classList.add('hidden'); $('#chat-side-list').classList.remove('hidden')
+    renderChat()
+    setChatStatus(chatSending.has(pid) || h.busy ? t('chat.thinking', { name: ceoName() }) : '')
+  }
+  function renderChat() {
+    if (!chat) return
+    $('#chat-title').textContent = `💬 ${t('chat.with', { name: ceoName() })}`
+    renderChatLog(true); renderChatSide()
+    const busy = chatSending.has(chat.id) || chat.busy
+    $('#chat-send').disabled = busy; $('#chat-text').disabled = false
+  }
+  function msgHtml(m) {
+    if (m.role === 'user') return `<div class="msg me"><div class="who">${esc(t('chat.you'))}</div><div class="bub">${esc(m.text).replace(/\n/g, '<br>')}</div></div>`
+    const files = m.seed ? [chat.products.summary, ...chat.products.main].filter(Boolean) : (m.files || [])
+    const chips = files.map(f => `<span class="file-chip ${f.changed ? 'chg' : ''}" data-rel="${esc(f.rel)}" title="${esc(f.rel)}">${fileIco(f.rel)} ${esc(f.rel)}${f.changed ? ` · ${esc(t('chat.changed'))}` : ''}</span>`).join('')
+    return `<div class="msg ceo ${m.error ? 'err' : ''}"><div class="who">${esc(ceoName())}</div><div class="bub md">${renderMarkdown(m.text)}${m.seed ? `<div class="hint seed">${esc(t('chat.seedNote'))}</div>` : ''}${chips ? `<div class="chips">${chips}</div>` : ''}</div></div>`
+  }
+  function renderChatLog(stick) {
+    if (!chat) return
+    const log = $('#chat-log')
+    log.innerHTML = chat.messages.map(msgHtml).join('')
+    bindFileRefs(log)
+    if (stick) log.scrollTop = log.scrollHeight
+  }
+  /** Make chips, markdown links and `inline-code` file names clickable. */
+  function bindFileRefs(root) {
+    for (const c of root.querySelectorAll('.file-chip[data-rel]')) c.onclick = () => { const f = findProduct(c.dataset.rel); if (f) previewChatFile(f) }
+    for (const l of root.querySelectorAll('.lnk[data-href]')) {
+      const f = findProduct(l.dataset.href)
+      if (f) { l.classList.add('file-link'); l.onclick = () => previewChatFile(f) }
+    }
+    for (const c of root.querySelectorAll('code')) {
+      if (c.closest('pre')) continue
+      const f = findProduct(c.textContent)
+      if (f && /\.[A-Za-z0-9]{1,6}$/.test(c.textContent)) { c.classList.add('file-link'); c.onclick = () => previewChatFile(f) }
+    }
+  }
+  function setChatStatus(text) {
+    const el = $('#chat-status'); el.textContent = text || ''; el.classList.toggle('hidden', !text)
+    if (text) $('#chat-log').scrollTop = $('#chat-log').scrollHeight
+  }
+  function renderChatSide() {
+    if (!chat) return
+    const pr = chat.products
+    const row = (f, star) => `<div class="file ${star ? 'summary' : ''} ${chat.sel?.rel === f.rel ? 'sel' : ''}" data-rel="${esc(f.rel)}"><span>${star ? '⭐' : fileIco(f.rel)}</span><span class="fn" title="${esc(f.rel)}">${esc(f.rel)}</span><span class="sz">${kb(f.size)}</span></div>`
+    const sec = (title, list, star) => list.length ? `<div class="sec-title">${esc(title)}</div>${list.map(f => row(f, star)).join('')}` : ''
+    $('#chat-side-list').innerHTML = `<div class="sec-title first">${esc(t('chat.products'))}</div>`
+      + (flatProducts(pr).length ? sec(t('chat.summary'), pr.summary ? [pr.summary] : [], true) + sec(t('chat.main'), pr.main) + sec(t('chat.other'), pr.others) : `<div class="hint" style="padding:10px">${esc(t('chat.noProducts'))}</div>`)
+    for (const el of $('#chat-side-list').querySelectorAll('.file[data-rel]')) {
+      const f = findProduct(el.dataset.rel)
+      el.onclick = () => previewChatFile(f)
+      el.ondblclick = () => api.open(f.path)
+    }
+  }
+  async function previewChatFile(f) {
+    if (!chat || !f) return
+    chat.sel = f
+    $('#chat-side-list').classList.add('hidden'); $('#chat-side-view').classList.remove('hidden')
+    $('#cp-name').textContent = `${fileIco(f.rel)} ${f.rel}`
+    $('#cp-open').onclick = () => api.open(f.path); $('#cp-reveal').onclick = () => api.reveal(f.path)
+    const body = $('#cp-body'); body.scrollTop = 0
+    const ext = f.rel.split('.').pop().toLowerCase()
+    const mine = chat.id
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+      body.innerHTML = '…'
+      try {
+        const r = await api.readImage(f.path)
+        if (chat?.id !== mine || chat.sel !== f) return
+        body.innerHTML = r.dataUrl ? `<img class="cp-img" src="${r.dataUrl}" alt="${esc(f.rel)}">` : `<p class="hint">${t('file.binaryHint', { kind: r.tooLarge ? t('file.tooLarge') : t('file.binary') })}</p>`
+      } catch (e) { body.innerHTML = `<p>${t('file.readFail', { error: esc(errText(e)) })}</p>` }
+      return
+    }
+    let r
+    try { r = await api.readFile(f.path) } catch (e) { body.innerHTML = `<p>${t('file.readFail', { error: esc(errText(e)) })}</p>`; return }
+    if (chat?.id !== mine || chat.sel !== f) return
+    if (r.binary || r.tooLarge) { body.innerHTML = `<p class="hint">${t('file.binaryHint', { kind: r.binary ? t('file.binary') : t('file.tooLarge') })}</p>`; return }
+    if (ext === 'md' || ext === 'markdown') { body.innerHTML = renderMarkdown(r.text); bindFileRefs(body) }
+    else body.innerHTML = `<pre><code>${esc(r.text)}</code></pre>`
+  }
+  async function sendChat() {
+    if (!chat) return
+    const pid = chat.id
+    const text = $('#chat-text').value.trim()
+    if (!text || chatSending.has(pid)) return
+    chatSending.add(pid)
+    $('#chat-text').value = ''; $('#chat-send').disabled = true
+    chat.messages.push({ role: 'user', text, at: Date.now() }); renderChatLog(true)
+    setChatStatus(t('chat.thinking', { name: ceoName() }))
+    try {
+      const r = await api.chatSend(pid, text)
+      if (chat?.id === pid) {
+        chat.messages.push(r.message); chat.products = r.products
+        const sel = chat.sel && flatProducts(r.products).find(f => f.rel === chat.sel.rel)
+        renderChatLog(true); renderChatSide()
+        if (sel && r.message.files?.some(f => f.changed && f.rel === sel.rel) && !$('#chat-side-view').classList.contains('hidden')) previewChatFile(sel)
+      }
+    } catch (e) {
+      if (chat?.id === pid) { chat.messages.push({ role: 'ceo', text: t('chat.sendFail', { error: errText(e) }), at: Date.now(), error: true }); renderChatLog(true) }
+    } finally {
+      chatSending.delete(pid)
+      if (chat?.id === pid) { setChatStatus(''); $('#chat-send').disabled = false; $('#chat-text').focus() }
+    }
+  }
+  $('#btn-chat').onclick = () => openChat()
+  $('#bv-chat').onclick = () => { if (bookId) { $('#archive-modal').classList.add('hidden'); openChat(bookId) } }
+  $('#chat-proj').onchange = e => loadChat(e.target.value)
+  $('#chat-send').onclick = sendChat
+  $('#chat-text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat() } })
+  $('#cp-back').onclick = () => { if (chat) chat.sel = null; $('#chat-side-view').classList.add('hidden'); $('#chat-side-list').classList.remove('hidden'); renderChatSide() }
+  $('#chat-folder').onclick = () => { const p = projects.find(x => x.id === chat?.id); if (p) api.open(p.dir) }
+  window.__openChat = id => openChat(id) // CDP smoke tests
+
   // ---------- settings ----------
   $('#btn-settings').onclick = () => openSettings()
   let harnessName = 'ceo', harnessDirty = {}
@@ -582,6 +742,7 @@
     $('#set-perm').value = settings.permissionMode
     $('#set-conc').value = settings.normalConcurrency
     $('#set-min').value = settings.minTeam; $('#set-max').value = settings.maxTeam
+    fillCompaction(P.normalizeCompaction(settings.compaction))
     fillDefault()
     $('#set-effort').innerHTML = effortOptions(LEVELS, settings.defaultEffort)
     harnessDirty = {}
@@ -592,6 +753,52 @@
     $('#set-harness-text').value = await api.harness(harnessName)
     pinfo = await api.providerInfo().catch(() => null)
     renderProviders()
+    renderContextBudget()
+  }
+  const tokenText = n => Number(n) > 0 ? Number(n).toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN') : t('ctx.unknown')
+  const sourceText = source => source ? t('ctx.source.' + source) : t('ctx.unknown')
+  function fillCompaction(c) {
+    $('#set-compact-auto').checked = c.auto
+    for (const [id, key, scale] of [['threshold','thresholdRatio',100],['headroom','headroomTokens',1],['summary','maxTokens',1],['retain','retainRatio',100],['retries','compactionRetries',1],['overflow','maxOverflowRetries',1]]) $('#set-compact-' + id).value = Number((c[key] * scale).toFixed(6))
+    $('#set-compact-provider').value = c.summarizationProvider || ''
+    $('#set-compact-model').value = c.summarizationModel || ''
+  }
+  function readCompaction() {
+    return P.normalizeCompaction({
+      auto: $('#set-compact-auto').checked,
+      thresholdRatio: Number($('#set-compact-threshold').value) / 100,
+      headroomTokens: Number($('#set-compact-headroom').value),
+      maxTokens: Number($('#set-compact-summary').value),
+      retainRatio: Number($('#set-compact-retain').value) / 100,
+      compactionRetries: Number($('#set-compact-retries').value),
+      maxOverflowRetries: Number($('#set-compact-overflow').value),
+      summarizationProvider: $('#set-compact-provider').value.trim(),
+      summarizationModel: $('#set-compact-model').value.trim(),
+    })
+  }
+  function renderContextBudget() {
+    const box = $('#context-budget')
+    let c
+    try { c = readCompaction() } catch (e) { box.innerHTML = `<p class="parameter-error">${esc(errText(e))}</p>`; return }
+    if (!settings.models.length) { box.innerHTML = `<p class="hint">${t('ctx.empty')}</p>`; return }
+    const rows = settings.models.map(m => {
+      try {
+        const b = P.modelBudget(m, c)
+        const invalid = b.thresholdTokens <= b.retainTokens || b.thresholdTokens <= 0
+        return `<tr><th scope="row">${esc(m.name || m.model)}</th><td>${tokenText(b.contextWindow)}</td><td>${tokenText(b.requestMaxTokens)}</td><td class="${invalid ? 'parameter-error' : ''}">${invalid ? esc(t('ctx.invalidBudget')) : `<strong>${tokenText(b.thresholdTokens)}</strong> <span class="hint">(${(b.thresholdRatio * 100).toFixed(1)}%)</span>`}</td><td>${tokenText(b.retainTokens)}</td></tr>`
+      } catch (e) { return `<tr><th scope="row">${esc(m.name || m.model)}</th><td colspan="4" class="parameter-error">${esc(errText(e))}</td></tr>` }
+    }).join('')
+    box.innerHTML = `${!c.auto ? `<p class="hint">${t('ctx.disabled')}</p>` : ''}<div class="budget-scroll"><table class="budget-table"><caption>${t('ctx.title')} · token</caption><thead><tr>${['model','window','output','trigger','retained'].map(k => `<th scope="col">${t('ctx.' + k)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`
+  }
+  $('#context-settings').addEventListener('input', renderContextBudget)
+  for (const button of document.querySelectorAll('[data-setting-jump]')) button.onclick = () => {
+    document.getElementById(button.dataset.settingJump).scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  $('#set-context-recommend').onclick = () => {
+    const m = settings.models.find(m => m.key === $('#set-default').value) || settings.models[0] || {}
+    const r = P.recommendModel(m)
+    fillCompaction({ ...P.normalizeCompaction(settings.compaction), ...r, maxTokens: r.summaryMaxTokens })
+    renderContextBudget(); $('#set-msg').textContent = t('ctx.recommended')
   }
   function fillDefault() {
     const sel = $('#set-default')
@@ -610,13 +817,11 @@
       card.querySelector('button').onclick = () => openProvider(route)
       for (const el of card.querySelectorAll('.pc-model')) {
         const m = models.find(x => x.key === el.dataset.k)
-        el.querySelector('.pc-test').onclick = async ev => {
-          const b = ev.currentTarget, res = el.querySelector('.test-res')
-          b.disabled = true; res.className = 'test-res run'; res.textContent = '⏳'
-          try {
-            const r = await api.testModel({ route, apiKeyEnv: p.apiKeyEnv, baseURL: p.baseURL, api: p.api, model: m.model })
-            res.className = 'test-res ok'; res.textContent = `✓ ${(r.ms / 1000).toFixed(1)}s`; res.title = r.reply || ''
-          } catch (e) { res.className = 'test-res bad'; res.textContent = '✕'; res.title = errText(e); toast(t('prov.testFail', { name: m.name, error: errText(e) })) } finally { b.disabled = false }
+        el.querySelector('.pc-test').onclick = () => {
+          openProvider(route)
+          const index = pv.models.findIndex(model => model.model === m.model)
+          const row = $('#pv-models').children[index]
+          if (row) { row.scrollIntoView({ block: 'nearest' }); testPvModel(pv.models[index], row) }
         }
       }
       box.append(card)
@@ -664,7 +869,9 @@
     const taken = takenFruits(); pv.models = []
     for (const m of x.models) {
       const f = nextFruit(taken); taken.add(f)
-      pv.models.push({ name: m.name, model: m.id, contextWindow: m.contextWindow || 200000, maxTokens: m.maxTokens || 0, fruit: f, fastModel: '', efforts: effortsFromDsh(m.reasoningEfforts) })
+      const model = { name: m.name, model: m.id, contextWindow: m.contextWindow || P.DEFAULT_CONTEXT_WINDOW, outputLimit: m.outputLimit || undefined, fruit: f, fastModel: '', efforts: effortsFromDsh(m.reasoningEfforts), vision: Array.isArray(m.input) ? m.input.includes('image') : undefined, limitSources: { contextWindow: m.contextWindow ? 'configured' : 'default', outputLimit: m.outputLimit ? 'configured' : undefined } }
+      model.maxTokens = P.recommendModel(model).maxTokens
+      pv.models.push(model)
     }
     $('#pv-keyhint').innerHTML = t('prov.credReuseLong', { ref: esc(x.apiKeyEnv) })
     renderPvModels()
@@ -681,10 +888,12 @@
       const row = document.createElement('div'); row.className = 'pm-row'
       row.innerHTML = `<button class="fruit-pick"><img src="${S.fruitURL(m.fruit, 28)}" /></button>
         <div class="pm-main">
-          <div class="pm-line"><input data-f="name" value="${esc(m.name)}" placeholder="${esc(t('prov.namePh2'))}" /><input data-f="model" value="${esc(m.model)}" placeholder="${esc(t('prov.modelPh'))}" spellcheck="false" /><input data-f="fastModel" value="${esc(m.fastModel || '')}" placeholder="${esc(t('prov.fastPh'))}" spellcheck="false" /></div>
-          <div class="pm-line limits"><span class="hint">${t('prov.inLimit')}</span><input data-f="contextWindow" value="${esc(m.contextWindow || '')}" placeholder="200000" type="number" min="1" /><span class="hint">${t('prov.outLimit')}</span><input data-f="maxTokens" value="${esc(m.maxTokens || '')}" placeholder="${esc(t('prov.outPh'))}" type="number" min="1" /></div>
+          <div class="pm-line"><input data-f="name" value="${esc(m.name)}" placeholder="${esc(t('prov.namePh2'))}" aria-label="${esc(t('prov.namePh2'))}" /><input data-f="model" value="${esc(m.model)}" placeholder="${esc(t('prov.modelPh'))}" aria-label="${esc(t('prov.modelPh'))}" spellcheck="false" /><input data-f="fastModel" value="${esc(m.fastModel || '')}" placeholder="${esc(t('prov.fastPh'))}" aria-label="${esc(t('prov.fastPh'))}" spellcheck="false" /></div>
+          <div class="model-limits"><label><span>${t('ctx.modelWindow')}</span><input data-f="contextWindow" value="${esc(m.contextWindow || '')}" placeholder="${esc(t('ctx.unknown'))}" type="number" min="1" step="1" /></label><label><span>${t('ctx.modelOutput')}</span><input data-f="maxTokens" value="${esc(m.maxTokens || '')}" type="number" min="1" step="1" /></label><label><span>${t('ctx.outputCapability')}</span><input data-f="outputLimit" value="${esc(m.outputLimit || '')}" placeholder="${esc(t('ctx.unknown'))}" type="number" min="1" step="1" /></label></div>
           <div class="pm-line efforts"><span class="hint">${t('pop.effort')}</span>${LEVELS.map(l => `<label class="eff ${m.efforts.includes(l) ? 'on' : ''}"><input type="checkbox" data-l="${l}" ${m.efforts.includes(l) ? 'checked' : ''} />${EFFORT_ICON[l]} ${effName(l)}</label>`).join('')}</div>
-          <div class="pm-test"><button class="pill-btn test-btn">${t('prov.test')}</button><span class="test-res ${m._test?.cls || ''}" title="${esc(m._test?.text || '')}">${esc(m._test?.text || '')}</span></div>
+          <label class="check model-vision"><input type="checkbox" data-vision ${m.vision !== false ? 'checked' : ''} /><span>${t('ctx.vision')}</span></label>
+          <div class="model-budget hint" aria-live="polite"></div><div class="model-metadata hint"></div>
+          <div class="pm-test"><button class="pill-btn test-btn">${t('ctx.detect')}</button><button class="pill-btn recommend-btn">${t('ctx.useRecommended')}</button><span class="test-res ${m._test?.cls || ''}" title="${esc(m._test?.text || '')}" role="status">${esc(m._test?.text || '')}</span></div>
         </div><button class="del">✕</button>`
       row.querySelector('.fruit-pick').onclick = () => {
         const taken = takenFruits(); taken.delete(m.fruit)
@@ -692,29 +901,71 @@
         for (let k = 1; k <= S.FRUIT_KEYS.length; k++) { const f = S.FRUIT_KEYS[(i0 + k) % S.FRUIT_KEYS.length]; if (!taken.has(f) || k === S.FRUIT_KEYS.length) { m.fruit = f; break } }
         renderPvModels()
       }
-      for (const inp of row.querySelectorAll('input[data-f]')) inp.oninput = () => { m[inp.dataset.f] = inp.value.trim() }
+      for (const inp of row.querySelectorAll('input[data-f]')) inp.oninput = () => {
+        const key = inp.dataset.f
+        m[key] = inp.type === 'number' ? (inp.value === '' ? 0 : Number(inp.value)) : inp.value.trim()
+        if (key === 'contextWindow' || key === 'outputLimit') m.limitSources = { ...m.limitSources, [key]: 'manual' }
+        if (key === 'model') { delete m.detectedLimits; delete m.limitsCheckedAt; delete m.outputLimit; delete m.inputLimit; delete m._test; m.limitSources = { contextWindow: 'manual' }; row.querySelector('[data-f="outputLimit"]').value = ''; row.querySelector('.test-res').textContent = '' }
+        updateModelBudget(row, m)
+      }
+      row.querySelector('[data-vision]').onchange = e => { m.vision = e.target.checked }
       for (const cb of row.querySelectorAll('input[data-l]')) cb.onchange = () => {
         m.efforts = LEVELS.filter(l => row.querySelector(`input[data-l="${l}"]`).checked)
         cb.parentElement.classList.toggle('on', cb.checked)
       }
       row.querySelector('.del').onclick = () => { pv.models.splice(i, 1); renderPvModels() }
       row.querySelector('.test-btn').onclick = () => testPvModel(m, row)
+      row.querySelector('.recommend-btn').onclick = () => { m.maxTokens = P.recommendModel(m).maxTokens; renderPvModels(); $('#pv-msg').textContent = t('ctx.modelRecommended') }
+      updateModelBudget(row, m)
       box.append(row)
     })
+  }
+  function updateModelBudget(row, m) {
+    const budget = row.querySelector('.model-budget'), metadata = row.querySelector('.model-metadata')
+    try {
+      const c = readCompaction(), b = P.modelBudget(m, c), r = P.recommendModel(m)
+      budget.classList.remove('parameter-error')
+      budget.textContent = t('ctx.modelSummary', { tokens: tokenText(b.thresholdTokens), percent: (b.thresholdRatio * 100).toFixed(1), output: tokenText(r.maxTokens) })
+    } catch (e) { budget.classList.add('parameter-error'); budget.textContent = errText(e) }
+    const detected = m.detectedLimits || {}
+    metadata.textContent = [t('ctx.detected', { context: tokenText(detected.contextWindow), input: tokenText(detected.inputLimit || m.inputLimit), output: tokenText(detected.outputLimit) }), t('ctx.detectSource', { context: sourceText(m.limitSources?.contextWindow), output: sourceText(m.limitSources?.outputLimit) }), m.limitsCheckedAt ? t('ctx.checked', { time: new Date(m.limitsCheckedAt).toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN') }) : ''].filter(Boolean).join('\n')
+  }
+  function applyModelInfo(m, info) {
+    if (!info || info.id !== m.model) return
+    m.detectedLimits = { ...m.detectedLimits }
+    m.limitSources = { ...m.limitSources }
+    for (const key of ['contextWindow', 'inputLimit', 'outputLimit']) {
+      if (!(Number.isSafeInteger(info[key]) && info[key] > 0)) continue
+      if (info.sources?.[key] !== 'configured') m.detectedLimits[key] = info[key]
+      if (key !== 'contextWindow' || m.limitSources.contextWindow !== 'manual') m[key] = info[key]
+      if (key !== 'contextWindow' || m.limitSources.contextWindow !== 'manual') m.limitSources[key] = info.sources?.[key] || 'provider'
+    }
+    if (info.reasoningEfforts !== undefined) m.efforts = effortsFromDsh(info.reasoningEfforts)
+    if (Array.isArray(info.input)) m.vision = info.input.includes('image')
+    if (info.checkedAt || ['contextWindow', 'inputLimit', 'outputLimit', 'reasoningEfforts', 'input'].some(key => info[key] !== undefined)) m.limitsCheckedAt = info.checkedAt || new Date().toISOString()
+    if (!m.maxTokens || m.maxTokens >= m.contextWindow || (m.outputLimit && m.maxTokens > m.outputLimit)) m.maxTokens = P.recommendModel(m).maxTokens
   }
   async function testPvModel(m, row) {
     const btn = row.querySelector('.test-btn'), res = row.querySelector('.test-res')
     const show = (cls, text) => { m._test = { cls, text }; res.className = `test-res ${cls}`; res.textContent = text; res.title = text }
     if (!m.model) return show('bad', t('prov.needModelId'))
+    const testedId = m.model
     btn.disabled = true; show('run', t('prov.testing'))
     try {
       const route = $('#pv-route').value.trim()
       const r = await api.testModel({ route, apiKeyEnv: pv.apiKeyEnv, baseURL: $('#pv-url').value.trim(), api: $('#pv-api').value, apiKey: $('#pv-key').value, model: m.model })
+      if (m.model !== testedId) return
+      applyModelInfo(m, r.modelInfo)
       show('ok', t('prov.modelOk', { sec: (r.ms / 1000).toFixed(1), reply: r.reply ? t('prov.replyInline', { reply: r.reply }) : '' }))
+      if (r.metadataWarning) $('#pv-msg').textContent = t('ctx.metadataMissing')
+      renderPvModels()
     } catch (e) { show('bad', `✕ ${errText(e)}`) } finally { btn.disabled = false }
   }
-  function addPvModel(id = '', name = '', ctx = 200000, max = 0) {
-    pv.models.push({ name: name || id, model: id, contextWindow: ctx || 200000, maxTokens: max || 0, fruit: nextFruit(takenFruits()), fastModel: '', efforts: [...DEFAULT_EFFORTS] })
+  function addPvModel(id = '', name = '', ctx = 0, max = 0, metadata = {}) {
+    const model = { name: name || id, model: id, contextWindow: ctx || P.DEFAULT_CONTEXT_WINDOW, outputLimit: metadata.outputLimit || max || undefined, fruit: nextFruit(takenFruits()), fastModel: '', efforts: [...DEFAULT_EFFORTS], limitSources: { contextWindow: ctx ? 'provider' : 'default', outputLimit: max ? 'provider' : undefined } }
+    applyModelInfo(model, { ...metadata, id, contextWindow: ctx || undefined, outputLimit: metadata.outputLimit || max || undefined })
+    model.maxTokens = P.recommendModel(model).maxTokens
+    pv.models.push(model)
   }
   $('#pv-fetch').onclick = async () => {
     const btn = $('#pv-fetch'); btn.disabled = true; btn.textContent = t('prov.fetching'); $('#pv-msg').textContent = ''
@@ -734,7 +985,7 @@
       found.querySelector('#pv-closefound').onclick = () => found.classList.add('hidden')
       found.querySelector('#pv-addsel').onclick = () => {
         for (const cb of fl.querySelectorAll('input:checked:not(:disabled)')) {
-          const x = list.find(y => y.id === cb.value); addPvModel(x.id, prettyName(x), x.contextWindow, x.maxTokens)
+          const x = list.find(y => y.id === cb.value); addPvModel(x.id, prettyName(x), x.contextWindow, x.maxTokens, x)
         }
         found.classList.add('hidden'); renderPvModels()
       }
@@ -755,13 +1006,11 @@
       let added = 0
       for (const x of list) {
         if (have.has(x.id)) {
-          // fill limits the user had not set
           const m = pv.models.find(y => y.model === x.id)
-          if (!m.contextWindow && x.contextWindow) m.contextWindow = x.contextWindow
-          if (!m.maxTokens && x.maxTokens) m.maxTokens = x.maxTokens
+          applyModelInfo(m, { ...x, outputLimit: x.outputLimit || x.maxTokens })
           continue
         }
-        addPvModel(x.id, prettyName(x), x.contextWindow || 200000, x.maxTokens || 0); added++
+        addPvModel(x.id, prettyName(x), x.contextWindow, x.maxTokens, x); added++
       }
       renderPvModels()
       say2(t('prov.fetched', { n: list.length, a: added }))
@@ -794,7 +1043,7 @@
   }
   async function afterModelsChanged() {
     pinfo = await api.providerInfo().catch(() => pinfo)
-    renderFruits(); O.setModels(settings.models); fillDefault(); renderProviders(); renderTopEffort()
+    renderFruits(); O.setModels(settings.models); fillDefault(); renderProviders(); renderTopEffort(); renderContextBudget()
     data = await api.init(); for (const a of data.agents) { agents.set(a.id, a); O.updateAgent(a) }
     if (popAgent) renderPop()
   }
@@ -826,7 +1075,7 @@
         <div class="imp-main">
           <div class="imp-line"><b>${esc(rec.displayName)}</b><code>${esc(rec.route)}</code><span class="chip">${esc(rec.api)}</span><span class="chip ${rec.hasKey ? 'ok' : 'warn'}">${rec.hasKey ? t('imp.keyMask', { mask: esc(rec.keyMask || '') }) : t('imp.credReuse')}</span><span class="chip">${t('imp.modelCount', { n: rec.models.length })}</span></div>
           <div class="imp-sub">${esc(rec.baseURL)}</div>
-          ${rec.models.length ? `<div class="imp-models">${models.map(m => `<small title="${esc(t('imp.limitsTitle'))}">${esc(m.id)} <i>${fmtK(m.contextWindow || 200000)}${m.maxTokens ? '/' + fmtK(m.maxTokens) : ''}</i></small>`).join('')}${more > 0 ? `<small>${t('imp.more', { n: more })}</small>` : ''}</div>` : `<div class="hint">${t('imp.autoFetch')}</div>`}
+          ${rec.models.length ? `<div class="imp-models">${models.map(m => `<small title="${esc(t('imp.limitsTitle'))}">${esc(m.id)} <i>${m.contextWindow ? fmtK(m.contextWindow) : esc(t('ctx.unknown'))}${m.maxTokens ? '/' + fmtK(m.maxTokens) : ''}</i></small>`).join('')}${more > 0 ? `<small>${t('imp.more', { n: more })}</small>` : ''}</div>` : `<div class="hint">${t('imp.autoFetch')}</div>`}
           <div class="hint">${esc(rec.origin)} · ${esc(rec.keyFrom || t('imp.credSaved'))}${rec.otherSources.length ? t('imp.alsoIn', { sources: esc(andJoin(rec.otherSources)) }) : ''}</div>
         </div>
       </label>`
@@ -852,18 +1101,18 @@
     try {
       for (const rec of r.records.filter(x => ids.includes(x.id))) {
         try {
-          let models = rec.models
+          let models = rec.models, fromDiscovery = false
           if (!models.length) {
-            try { models = await api.discover({ keyFrom: rec.id, baseURL: rec.baseURL, api: rec.api }) }
+            try { models = await api.discover({ keyFrom: rec.id, baseURL: rec.baseURL, api: rec.api }); fromDiscovery = true }
             catch (e) { throw new Error(t('imp.discoverFail', { error: errText(e) })) }
           }
           if (!models.length) throw new Error(t('imp.noModels'))
-          const list = models.slice(0, 40).map(m => ({
-            name: m.name || m.id, model: m.id,
-            contextWindow: m.contextWindow || 200000,
-            maxTokens: m.maxTokens && m.maxTokens < (m.contextWindow || 200000) ? m.maxTokens : 0,
-            fruit: pickFruit(), fastModel: '', efforts: [...DEFAULT_EFFORTS],
-          }))
+          const list = models.slice(0, 40).map(m => {
+            const model = { name: m.name || m.id, model: m.id, contextWindow: m.contextWindow || P.DEFAULT_CONTEXT_WINDOW, outputLimit: m.outputLimit || undefined, fruit: pickFruit(), fastModel: '', efforts: effortsFromDsh(m.reasoningEfforts), vision: Array.isArray(m.input) ? m.input.includes('image') : undefined, limitSources: { contextWindow: m.contextWindow ? 'configured' : 'default', outputLimit: m.outputLimit ? 'configured' : undefined } }
+            if (fromDiscovery) applyModelInfo(model, { ...m, id: m.id, outputLimit: m.outputLimit || m.maxTokens })
+            model.maxTokens = P.recommendModel(model).maxTokens
+            return model
+          })
           settings = await api.saveProvider(rec.route, {
             existing: false, displayName: rec.displayName || rec.route, api: rec.api,
             baseURL: rec.baseURL, apiKeyEnv: rec.keyEnv, keyFrom: rec.hasKey ? rec.id : undefined,
@@ -888,8 +1137,11 @@
   $('#set-openharness').onclick = () => api.harnessDir()
   $('#set-log').onclick = () => api.openLog()
   $('#set-save').onclick = async () => {
+    const btn = $('#set-save'); btn.disabled = true
     harnessDirty[harnessName] = $('#set-harness-text').value
     try {
+      const compaction = readCompaction()
+      P.validateSettings({ ...settings, compaction })
       for (const [n, x] of Object.entries(harnessDirty)) await api.saveHarness(n, x)
       settings = await api.saveSettings({
         workspace: $('#set-workspace').value.trim() || settings.workspace,
@@ -901,12 +1153,13 @@
         maxTeam: Math.max(1, Number($('#set-max').value) || 5),
         defaultModel: $('#set-default').value,
         defaultEffort: $('#set-effort').value,
+        compaction,
       })
       renderFruits(); O.setModels(settings.models)
       data = await api.init(); for (const a of data.agents) { agents.set(a.id, a); O.updateAgent(a) }
       projects = data.projects; O.setProjects(projects)
       $('#settings-modal').classList.add('hidden'); toast(t('set.saved'))
-    } catch (e) { $('#set-msg').textContent = errText(e) }
+    } catch (e) { $('#set-msg').textContent = errText(e) } finally { btn.disabled = false }
   }
 
   // greeting

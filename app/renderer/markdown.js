@@ -6,7 +6,7 @@ window.renderMarkdown = (src) => {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="lnk">$1</span>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, href) => `<span class="lnk" data-href="${href.replace(/"/g, '&quot;')}">${text}</span>`)
   const lines = src.replace(/\r/g, '').split('\n')
   let out = '', i = 0
   while (i < lines.length) {

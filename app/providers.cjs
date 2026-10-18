@@ -104,7 +104,78 @@ function listingUrl(baseURL, api) {
   return `${base.endsWith('/v1') ? base.slice(0, -3) : base}/v1/models?limit=1000`
 }
 
-const posInt = (...xs) => xs.find(x => Number.isInteger(x) && x > 0)
+/** Listings often encode token limits as strings; never accept fractions or unsafe integers. */
+const posInt = (...xs) => xs.map(x => typeof x === 'string' && /^\d+$/.test(x.trim()) ? Number(x) : x).find(x => Number.isSafeInteger(x) && x > 0)
+
+function reasoningEfforts(raw, catalog = false) {
+  const value = raw?.reasoningEfforts ?? raw?.reasoning_efforts ?? raw?.supported_reasoning_efforts
+  if (value === false || raw?.reasoning === false) return false
+  if (Array.isArray(value)) {
+    const levels = THINKING_LEVELS.filter(level => value.includes(level))
+    if (levels.length) return Object.fromEntries(levels.map(level => [level, level === 'off' ? null : level]))
+  } else if (value && typeof value === 'object') {
+    const entries = THINKING_LEVELS.filter(level => typeof value[level] === 'string' && value[level] || level === 'off' && value[level] === null)
+    if (entries.length) return Object.fromEntries(entries.map(level => [level, value[level]]))
+  }
+  // This defaulting belongs to the installed pi-ai catalog contract, not to arbitrary APIs.
+  if (catalog && raw?.reasoning === true) {
+    const map = raw.thinkingLevelMap || {}
+    return Object.fromEntries(THINKING_LEVELS.filter(level => map[level] !== null && (!['xhigh', 'max'].includes(level) || map[level] !== undefined)).map(level => [level, map[level] ?? (level === 'off' ? null : level)]))
+  }
+}
+
+function modelMetadata(raw, catalog = false) {
+  const input = raw?.input ?? raw?.input_modalities ?? raw?.architecture?.input_modalities
+  const modalities = Array.isArray(input) ? [...new Set(input.filter(x => typeof x === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(x)))] : []
+  return {
+    contextWindow: posInt(raw?.contextWindow, raw?.context_window, raw?.context_length, raw?.limit?.context, raw?.top_provider?.context_length),
+    // An input-only limit is not the size of a shared input/output context window.
+    inputLimit: posInt(raw?.inputLimit, raw?.max_input_tokens, raw?.input_token_limit, raw?.limit?.input),
+    outputLimit: posInt(raw?.outputLimit, raw?.maxTokens, raw?.max_tokens, raw?.max_output_tokens, raw?.max_completion_tokens, raw?.output_token_limit, raw?.limit?.output, raw?.top_provider?.max_completion_tokens),
+    reasoningEfforts: reasoningEfforts(raw, catalog),
+    input: modalities.length ? modalities : undefined,
+  }
+}
+
+const METADATA_FIELDS = ['contextWindow', 'inputLimit', 'outputLimit', 'reasoningEfforts', 'input']
+
+/** Read data, without importing provider code or contacting another service. */
+function catalogMetadata({ dshRoot, route, model, api }) {
+  for (const root of dshRoots(dshRoot)) {
+    const packages = [path.join(root, 'node_modules', '@earendil-works', 'pi-ai'), path.join(root, 'packages', 'llm', 'llm-pi-ai', 'node_modules', '@earendil-works', 'pi-ai')]
+    try {
+      for (const dir of fs.readdirSync(path.join(root, 'node_modules', '.pnpm'))) {
+        if (dir.startsWith('@earendil-works+pi-ai@')) packages.push(path.join(root, 'node_modules', '.pnpm', dir, 'node_modules', '@earendil-works', 'pi-ai'))
+      }
+    } catch {}
+    for (const pkg of packages) {
+      const dataDir = path.join(pkg, 'dist', 'providers', 'data')
+      let files
+      try { files = fs.readdirSync(dataDir).filter(file => /^[a-z][a-z0-9-]*\.json$/.test(file)) } catch { continue }
+      const preferred = ROUTE_PATTERN.test(route || '') ? `${route}.json` : ''
+      const matches = []
+      for (const file of [...files.filter(file => file === preferred), ...files.filter(file => file !== preferred)]) {
+        let data
+        try { data = JSON.parse(fs.readFileSync(path.join(dataDir, file), 'utf8')) } catch { continue }
+        for (const [protocol, models] of Object.entries(data || {})) {
+          const raw = models?.[model]
+          if (!raw || raw.id !== model || (raw.api || protocol) !== api) continue
+          const metadata = modelMetadata(raw, true)
+          if (file === preferred) return metadata
+          matches.push(metadata)
+        }
+      }
+      if (!matches.length) continue
+      // A gateway alias can name several catalog providers. Keep only facts they agree on.
+      const metadata = {}
+      for (const field of METADATA_FIELDS) {
+        if (matches[0][field] !== undefined && matches.every(row => JSON.stringify(row[field]) === JSON.stringify(matches[0][field]))) metadata[field] = matches[0][field]
+      }
+      return metadata
+    }
+  }
+  return {}
+}
 
 /** Ask the endpoint which models it serves (DSH discovery semantics). */
 async function discover(fetchImpl, { baseURL, api, apiKey }) {
@@ -116,10 +187,12 @@ async function discover(fetchImpl, { baseURL, api, apiKey }) {
     else headers.authorization = `Bearer ${apiKey}`
   }
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000)
-  let res
-  try { res = await fetchImpl(url, { headers, signal: ac.signal }) } catch (e) { throw new Error(T('err.connect', { url, error: e.message || e })) } finally { clearTimeout(t) }
+  let res, body
+  try {
+    res = await fetchImpl(url, { headers, signal: ac.signal })
+    body = await res.json().catch(() => null)
+  } catch (e) { throw new Error(T('err.connect', { url, error: e.message || e })) } finally { clearTimeout(t) }
   if (!res.ok) throw new Error(T('err.httpStatus', { url, status: res.status, auth: res.status === 401 || res.status === 403 ? T('err.authHint') : '' }))
-  const body = await res.json().catch(() => null)
   let rows
   if (Array.isArray(body?.data)) rows = body.data.map(raw => ({ raw }))
   else if (body?.models && typeof body.models === 'object' && !Array.isArray(body.models)) rows = Object.entries(body.models).filter(([, r]) => r && typeof r === 'object').map(([key, raw]) => ({ key, raw }))
@@ -127,17 +200,14 @@ async function discover(fetchImpl, { baseURL, api, apiKey }) {
   const out = []
   for (const { key, raw } of rows) {
     const id = key || raw?.id; if (typeof id !== 'string' || !id) continue
-    out.push({
-      id, name: raw?.name || raw?.display_name || raw?.displayName || id,
-      contextWindow: posInt(raw?.contextWindow, raw?.context_window, raw?.context_length, raw?.max_input_tokens, raw?.limit?.context),
-      maxTokens: posInt(raw?.maxTokens, raw?.max_tokens, raw?.max_output_tokens, raw?.max_completion_tokens, raw?.limit?.output, raw?.top_provider?.max_completion_tokens),
-    })
+    const metadata = modelMetadata(raw)
+    out.push({ id, name: raw?.name || raw?.display_name || raw?.displayName || id, ...metadata, maxTokens: metadata.outputLimit })
   }
   return out
 }
 
-/** Send one tiny real request to a model; resolves { ms, reply } or throws a readable error. */
-async function testModel(fetchImpl, { baseURL, api, apiKey, model }) {
+/** Probe connectivity with one small request, then obtain declared metadata without capacity stress tests. */
+async function testModel(fetchImpl, { baseURL, api, apiKey, model, route, dshRoot, configuredModel }) {
   if (!/^https?:\/\//.test(baseURL || '')) throw new Error(T('err.httpBase'))
   if (!model) throw new Error(T('err.needModel'))
   const base = baseURL.replace(/\/+$/, '')
@@ -174,7 +244,28 @@ async function testModel(fetchImpl, { baseURL, api, apiKey, model }) {
     ?? j?.output_text
     ?? (Array.isArray(j?.output) ? j.output.flatMap(o => o.content || []).map(c => c.text || '').join('') : null)
     ?? ''
-  return { ms, reply: String(reply).trim().slice(0, 60) }
+  const modelInfo = { id: model, sources: {}, checkedAt: new Date().toISOString() }
+  let metadataWarning
+  let remote
+  try {
+    const models = await discover(fetchImpl, { baseURL, api, apiKey })
+    remote = models.find(row => row.id === model)
+    if (!remote) metadataWarning = 'model-not-listed'
+    else if (!remote.contextWindow || !remote.outputLimit) metadataWarning = 'limits-not-reported'
+  } catch { metadataWarning = 'metadata-unavailable' }
+  const catalog = catalogMetadata({ dshRoot, route, model, api })
+  // A configured maxTokens is the request cap, not proof of output capability.
+  const configured = configuredModel && (configuredModel.model || configuredModel.id) === model
+    ? modelMetadata({ ...configuredModel, maxTokens: undefined }) : {}
+  for (const field of METADATA_FIELDS) {
+    for (const [source, metadata] of [['provider', remote], ['dsh-catalog', catalog], ['configured', configured]]) {
+      if (metadata?.[field] === undefined) continue
+      modelInfo[field] = metadata[field]
+      modelInfo.sources[field] = source
+      break
+    }
+  }
+  return { ms, reply: String(reply).trim().slice(0, 60), modelInfo, ...(metadataWarning ? { metadataWarning } : {}) }
 }
 
 /** Providers declared (llm-pi-ai) in other DSH profiles, for one-click import. */

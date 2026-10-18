@@ -6,7 +6,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const crypto = require('node:crypto')
-const { RuntimePool, writeProfile } = require('./runtime.cjs')
+const { RuntimePool } = require('./runtime.cjs')
+const parameters = require('./parameters.js')
 const prov = require('./providers.cjs')
 const agents = require('./agents.cjs')
 const I18N = require('./renderer/i18n.js')
@@ -48,13 +49,14 @@ const DEFAULT_SETTINGS = {
   normalConcurrency: 3,
   minTeam: 2,
   maxTeam: 5,
+  compaction: parameters.DEFAULT_COMPACTION,
   // No built-in API configuration: the user adds providers/models in Settings.
   providers: {},
   models: [],
 }
 const NO_MODEL_MSG = () => T('err.noModel')
 /** Default per-request output cap used to sanity-check a model entry. */
-const DEFAULT_CONTEXT_WINDOW = 200000
+const DEFAULT_CONTEXT_WINDOW = parameters.DEFAULT_CONTEXT_WINDOW
 
 function log(msg) {
   try { fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`) } catch {}
@@ -64,10 +66,20 @@ function readJson(file, fallback) {
 }
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8')
+  const temporary = `${file}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', 'utf8')
+    fs.renameSync(temporary, file)
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary)
+  }
 }
 
-let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_FILE, {}) }
+const loadedSettings = readJson(SETTINGS_FILE, {})
+let settings = parameters.migrateSettings({ ...DEFAULT_SETTINGS, ...loadedSettings,
+  compaction: loadedSettings.compaction,
+})
+if (JSON.stringify(settings) !== JSON.stringify(loadedSettings)) writeJson(SETTINGS_FILE, settings)
 for (const m of settings.models) if (!Array.isArray(m.efforts)) m.efforts = ['off', 'low', 'medium', 'high']
 const projectsDir = () => path.join(settings.workspace, 'projects')
 
@@ -136,7 +148,6 @@ const publicAgent = a => ({ ...a, effectiveModel: modelOf(a), effectiveEffort: e
 // ---------- runtime ----------
 let pool
 function initPool() {
-  writeProfile(settings)
   pool = new RuntimePool(settings, log)
 }
 
@@ -583,7 +594,130 @@ function setRush(on) {
   emit('rush', { on: state.rush })
 }
 
+// ---------- project chat: talk to the CEO about a finished project ----------
+const chatFile = p => path.join(p.dir, '.office', 'chat.json')
+const readChat = p => { const v = readJson(chatFile(p), []); return Array.isArray(v) ? v : [] }
+/** projectId -> { sid, rt }. One CEO session per project keeps its context across turns. */
+const chatSessions = new Map()
+const chatBusy = new Set()
+const fileRec = f => ({ rel: f.rel, path: f.path, size: f.size, mtime: f.mtime })
+
+/** The project's main outputs: summary first, then each employee's deliverable, then everything else. */
+function productsOf(p) {
+  const all = listFiles(p.dir).filter(f => !f.rel.startsWith('附件/'))
+  const base = r => r.split('/').pop()
+  const used = new Set()
+  const summary = all.find(f => /(^|\/)00-.*总结/.test(f.rel)) || all.find(f => /总结/.test(f.rel)) || null
+  if (summary) used.add(summary.rel)
+  const main = []
+  for (const d of (p.assignments || []).map(a => a.deliverable).filter(Boolean)) {
+    const f = all.find(x => !used.has(x.rel) && (x.rel === d || base(x.rel) === d))
+    if (f) { used.add(f.rel); main.push(f) }
+  }
+  const others = all.filter(f => !used.has(f.rel)).sort((a, b) => a.rel.localeCompare(b.rel))
+  return { summary: summary && fileRec(summary), main: main.map(fileRec), others: others.map(fileRec) }
+}
+
+function chatContextPrompt(p, history) {
+  const prods = productsOf(p)
+  const names = [prods.summary, ...prods.main, ...prods.others].filter(Boolean).slice(0, 60)
+  const goal = p.goal ? `${p.goal.goal || ''}${p.goal.acceptance?.length ? `\n验收标准：${p.goal.acceptance.join('；')}` : ''}` : '（无）'
+  const talk = history.slice(-16).map(m => `${m.role === 'user' ? '老板' : '你（CEO）'}：${String(m.text).slice(0, 800)}`).join('\n\n')
+  return `${harness('ceo', { projectDir: p.dir, projectRel: p.rel })}
+
+## 现在：项目对话
+项目「${p.title}」已经${p.status === 'done' ? '验收归档' : '结束（未完全成功）'}，老板想接着和你聊这个项目。这一步不需要输出 JSON，用自然语言直接回答；用老板使用的语言回复，简洁具体。
+- 项目目录：${p.dir}
+- 老板最初的任务：${p.brief || '（无更多描述）'}
+- 项目目标：${goal}
+- 你上次的验收汇报：${(p.summary || '（无）').slice(0, 3000)}
+- 项目文件（相对项目目录）：
+${names.map(f => `  - ${f.rel}`).join('\n') || '  （暂无）'}
+${talk ? `\n之前的对话：\n${talk}\n` : ''}
+规则：
+1. 老板问成果内容、要解读或对比时，先读对应文件再回答，不要凭印象。
+2. 老板要求修改、补充或重做某个成果时，直接改项目目录里的文件（或新建文件），改完说明改了哪些文件。
+3. 回复里提到文件时，用项目目录内的相对路径（例如 02-主要成果.md），方便老板点击查看。
+4. 不要修改「附件」文件夹里的原件。`
+}
+
+async function chatSend(id, input) {
+  const text = String(input || '').trim()
+  if (!text) throw new Error(T('err.chatEmpty'))
+  const p = listProjects().find(x => x.id === id)
+  if (!p) throw new Error(T('err.chatNoProject'))
+  if (!['done', 'failed'].includes(p.status)) throw new Error(T('err.chatNotReady'))
+  if (!settings.models?.length) throw new Error(NO_MODEL_MSG())
+  if (chatBusy.has(id)) throw new Error(T('err.chatBusy'))
+  chatBusy.add(id)
+  const ceo = agent('ceo')
+  const solo = !current // do not touch the CEO's office status while a project is running
+  try {
+    const history = readChat(p)
+    history.push({ role: 'user', text, at: Date.now() })
+    writeJson(chatFile(p), history)
+    const rt = pool.get(modelOf(ceo), false, effortOf(ceo))
+    let sess = chatSessions.get(id)
+    const fresh = !sess || sess.rt !== rt
+    if (fresh) { sess = { sid: `ceo-chat-${crypto.randomBytes(5).toString('hex')}`, rt }; chatSessions.set(id, sess) }
+    const prompt = fresh ? `${chatContextPrompt(p, history.slice(0, -1))}\n\n## 老板说\n${text}` : text
+    const sig = list => new Map(list.map(f => [f.rel, `${f.size}:${Math.round(f.mtime)}`]))
+    const before = sig(listFiles(p.dir))
+    if (solo) setAgent('ceo', { status: 'busy', activity: T('act.chatting') })
+    emit('chat-status', { project: id, text: T('chat.thinking', { name: ceo?.name || 'CEO' }) })
+    const out = await rt.run(sess.sid, prompt, ev => {
+      if (ev.type === 'tool/call') emit('chat-status', { project: id, text: toolLabel(ev.data.name, ev.data.arguments) })
+      else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('chat-status', { project: id, text: T('chat.thinking', { name: ceo?.name || 'CEO' }) })
+    })
+    const reply = (out || '').trim() || T('chat.noReply')
+    const after = listFiles(p.dir)
+    const files = []
+    for (const f of after) {
+      const changed = before.get(f.rel) !== `${f.size}:${Math.round(f.mtime)}`
+      const b = f.rel.split('/').pop()
+      const mentioned = reply.includes(f.rel) || (b.length >= 5 && reply.includes(b))
+      if (changed || mentioned) files.push({ ...fileRec(f), changed })
+    }
+    files.sort((a, b) => (b.changed - a.changed) || a.rel.localeCompare(b.rel))
+    const message = { role: 'ceo', text: reply, at: Date.now(), files: files.slice(0, 12) }
+    const latest = readChat(p); latest.push(message); writeJson(chatFile(p), latest)
+    if (solo) emit('say', { id: 'ceo', text: reply.slice(0, 60), ms: 4000 })
+    return { message, products: productsOf(p) }
+  } catch (err) {
+    chatSessions.delete(id) // next turn rebuilds the context from the saved transcript
+    log(`chat ${id} failed: ${err.stack || err}`)
+    throw err
+  } finally {
+    chatBusy.delete(id)
+    emit('chat-status', { project: id, text: '' })
+    if (solo && !current) setAgent('ceo', { status: 'idle', activity: T('act.chatDone') })
+  }
+}
+
+/** Resolve a path and make sure it stays inside the projects folder. */
+function inProjects(file) {
+  const root = path.resolve(projectsDir())
+  const full = path.resolve(String(file))
+  if (full !== root && !full.startsWith(root + path.sep)) throw new Error('outside projects')
+  return full
+}
+
 // ---------- IPC ----------
+ipcMain.handle('office:chatHistory', (_e, id) => {
+  const p = listProjects().find(x => x.id === id); if (!p) return null
+  let messages = readChat(p)
+  if (!messages.length && p.summary) messages = [{ role: 'ceo', text: p.summary, at: p.finishedAt || p.createdAt, seed: true }]
+  return { id: p.id, title: p.title, status: p.status, messages, products: productsOf(p), busy: chatBusy.has(id) }
+})
+ipcMain.handle('office:chatSend', (_e, id, text) => chatSend(id, text))
+ipcMain.handle('office:readImage', (_e, file) => {
+  const full = inProjects(file)
+  const st = fs.statSync(full)
+  if (st.size > 12_000_000) return { tooLarge: true }
+  const mime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }[path.extname(full).slice(1).toLowerCase()]
+  if (!mime) return { binary: true }
+  return { dataUrl: `data:${mime};base64,${fs.readFileSync(full).toString('base64')}` }
+})
 ipcMain.handle('office:init', () => ({
   settings, agents: state.agents.map(publicAgent), rush: state.rush,
   projects: listProjects(), current: current?.id || null, queue: queue.map(q => q.id),
@@ -642,7 +776,8 @@ ipcMain.handle('office:testModel', async (_e, req) => {
   const ref = req.apiKeyEnv || (req.route && prov.ROUTE_PATTERN.test(req.route) ? prov.deriveKeyRef(req.route) : '')
   const apiKey = keyFor(req) || (ref ? prov.storedKey(settings.dshRoot, ref) : undefined)
   const { net } = require('electron')
-  return prov.testModel((url, init) => net.fetch(url, init), { baseURL: req.baseURL, api: req.api, apiKey, model: req.model })
+  const configuredModel = settings.models.find(m => m.provider === req.route && m.model === req.model)
+  return prov.testModel((url, init) => net.fetch(url, init), { route: req.route, baseURL: req.baseURL, api: req.api, apiKey, model: req.model, dshRoot: settings.dshRoot, configuredModel })
 })
 ipcMain.handle('office:rename', (_e, id, name) => {
   const a = agent(id); if (!a) return null
@@ -677,36 +812,43 @@ ipcMain.handle('office:saveProvider', async (_e, route, p, apiKey, models) => {
     if (!m.model) throw new Error(T('err.modelEmpty'))
     if (ids.has(m.model)) throw new Error(T('err.modelDup', { model: m.model }))
     ids.add(m.model)
-    const ctx = Number(m.contextWindow) || 0, out = Number(m.maxTokens) || 0
-    if (ctx && !Number.isFinite(ctx)) throw new Error(T('err.ctxNumber', { model: m.model }))
-    if (out && (!Number.isInteger(out) || out < 1)) throw new Error(T('err.outInt', { model: m.model }))
-    if (ctx && out && out >= ctx) throw new Error(T('err.outLessCtx', { model: m.model, out, ctx }))
+    parameters.validateModel(m)
   }
   const apiKeyEnv = assertRef(settings.providers?.[route]?.apiKeyEnv || p.apiKeyEnv || prov.deriveKeyRef(route))
   // The key arrives as a positional argument; a one-click agent import may
   // instead reference a secret the scan cached (keyFrom), never sent to the UI.
   const incoming = (apiKey || '').trim() || (p.keyFrom ? agents.secretOf(p.keyFrom) : null)
-  if (incoming) prov.setKey(settings.dshRoot, apiKeyEnv, incoming)
-  else if (!prov.storedKey(settings.dshRoot, apiKeyEnv)) throw new Error(T('err.needKey'))
   const used = new Set(settings.models.filter(m => m.provider !== route).map(m => m.key))
   const clean = models.map(m => {
     let key = m.key && !used.has(m.key) ? m.key : `${route}-${m.model}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
     while (used.has(key)) key += '-2'
     used.add(key)
-    return {
+    const previous = settings.models.find(old => old.provider === route && old.model === m.model)
+    return parameters.validateModel({
       key, name: (m.name || m.model).trim(), provider: route, model: m.model.trim(),
-      contextWindow: Number(m.contextWindow) > 0 ? Math.floor(Number(m.contextWindow)) : DEFAULT_CONTEXT_WINDOW,
-      maxTokens: Number(m.maxTokens) > 0 ? Math.floor(Number(m.maxTokens)) : 0,
+      contextWindow: m.contextWindow ?? previous?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+      maxTokens: m.maxTokens ?? previous?.maxTokens,
+      outputLimit: m.outputLimit ?? m.modelInfo?.outputLimit ?? previous?.outputLimit,
+      inputLimit: m.inputLimit ?? m.modelInfo?.inputLimit ?? previous?.inputLimit,
+      detectedLimits: m.detectedLimits ?? previous?.detectedLimits,
+      limitSources: m.limitSources ?? m.modelInfo?.sources ?? previous?.limitSources,
+      limitsCheckedAt: m.limitsCheckedAt ?? m.modelInfo?.checkedAt ?? previous?.limitsCheckedAt,
+      vision: m.vision ?? previous?.vision,
       fruit: m.fruit || 'apple', fastModel: (m.fastModel || '').trim(),
       efforts: prov.THINKING_LEVELS.filter(l => (m.efforts || []).includes(l)),
-    }
+    })
   })
-  settings.providers = { ...settings.providers, [route]: { displayName: p.displayName || route, apiKeyEnv, api: p.api, baseURL: p.baseURL.trim() } }
   const before = settings.models.findIndex(m => m.provider === route)
   const others = settings.models.filter(m => m.provider !== route)
-  settings.models = before < 0 ? [...others, ...clean] : [...others.slice(0, before), ...clean, ...others.slice(before)]
-  if (!settings.models.some(m => m.key === settings.defaultModel)) settings.defaultModel = settings.models[0].key
-  writeJson(SETTINGS_FILE, settings)
+  const next = parameters.validateSettings({ ...settings,
+    providers: { ...settings.providers, [route]: { displayName: p.displayName || route, apiKeyEnv, api: p.api, baseURL: p.baseURL.trim() } },
+    models: before < 0 ? [...others, ...clean] : [...others.slice(0, before), ...clean, ...others.slice(before)],
+  })
+  if (!next.models.some(m => m.key === next.defaultModel)) next.defaultModel = next.models[0].key
+  if (incoming) prov.setKey(settings.dshRoot, apiKeyEnv, incoming)
+  else if (!prov.storedKey(settings.dshRoot, apiKeyEnv)) throw new Error(T('err.needKey'))
+  writeJson(SETTINGS_FILE, next)
+  settings = next
   await pool.configure(settings)
   for (const a of state.agents) send('office:agent', publicAgent(a))
   return settings
@@ -715,9 +857,13 @@ ipcMain.handle('office:deleteProvider', async (_e, route) => {
   if (current) throw new Error(T('err.projectBusy'))
   const rest = settings.models.filter(m => m.provider !== route)
   const { [route]: _gone, ...others } = settings.providers || {}
-  settings.providers = others; settings.models = rest
-  if (!rest.some(m => m.key === settings.defaultModel)) settings.defaultModel = rest[0]?.key || ''
-  writeJson(SETTINGS_FILE, settings)
+  const compaction = settings.compaction.summarizationProvider === route
+    ? { ...settings.compaction, summarizationProvider: '', summarizationModel: '' }
+    : settings.compaction
+  const next = parameters.validateSettings({ ...settings, providers: others, models: rest, compaction })
+  if (!rest.some(m => m.key === next.defaultModel)) next.defaultModel = rest[0]?.key || ''
+  writeJson(SETTINGS_FILE, next)
+  settings = next
   await pool.configure(settings)
   for (const a of state.agents) send('office:agent', publicAgent(a))
   return settings
@@ -728,9 +874,7 @@ ipcMain.handle('office:files', (_e, id) => {
   return listFiles(p.dir)
 })
 ipcMain.handle('office:readFile', (_e, file) => {
-  const root = path.resolve(projectsDir())
-  const full = path.resolve(file)
-  if (!full.startsWith(root)) throw new Error('outside projects')
+  const full = inProjects(file)
   const st = fs.statSync(full)
   if (st.size > 2_000_000) return { tooLarge: true }
   const buf = fs.readFileSync(full)
@@ -756,9 +900,12 @@ ipcMain.handle('office:pickDir', async () => {
 })
 ipcMain.handle('office:saveSettings', async (_e, next) => {
   if (current) throw new Error(T('err.settingsBusy'))
-  settings = { ...settings, ...next }
-  writeJson(SETTINGS_FILE, settings)
-  fs.mkdirSync(projectsDir(), { recursive: true })
+  const validated = parameters.validateSettings({ ...settings, ...next,
+    compaction: { ...settings.compaction, ...next.compaction },
+  })
+  fs.mkdirSync(path.join(validated.workspace, 'projects'), { recursive: true })
+  writeJson(SETTINGS_FILE, validated)
+  settings = validated
   await pool.configure(settings)
   return settings
 })
