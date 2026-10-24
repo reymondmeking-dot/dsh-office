@@ -14,6 +14,14 @@ const codexCli = require('./codex.cjs')
 const I18N = require('./renderer/i18n.js')
 const T = (k, v) => I18N.t(k, v)
 const jn = a => a.join(I18N.getLang() === 'en' ? ', ' : '、')
+/** UI language picks the agents' working language too: prompts, harness, names, file names. */
+const EN = () => I18N.getLang() === 'en'
+const L = (zh, en) => EN() ? en : zh
+/** Built-in CEO/HR names follow the UI language until the user renames them. */
+const DEFAULT_NAMES = { ceo: { zh: '乔老板', en: 'Joe' }, hr: { zh: '安娜', en: 'Anna' } }
+const DEFAULT_TITLES = { 'HR 总监': 'HR Director' }
+const shownName = a => { const d = DEFAULT_NAMES[a?.id]; return d && (a.name === d.zh || a.name === d.en) ? (EN() ? d.en : d.zh) : a?.name }
+const shownTitle = a => EN() && DEFAULT_TITLES[a?.title] ? DEFAULT_TITLES[a.title] : a?.title
 
 // On Linux the Chromium SUID sandbox is unavailable when running as root
 // (Docker/CI) or without unprivileged user namespaces; fall back automatically.
@@ -86,9 +94,11 @@ const projectsDir = () => path.join(settings.workspace, 'projects')
 
 // ---------- harness ----------
 function ensureHarness() {
-  fs.mkdirSync(HARNESS_DIR, { recursive: true })
+  fs.mkdirSync(path.join(HARNESS_DIR, 'en'), { recursive: true })
   const norm = s => s.replace(/\r\n/g, '\n').trim()
   for (const f of ['ceo.md', 'hr.md', 'employee.md']) {
+    const enDst = path.join(HARNESS_DIR, 'en', f), enSrc = path.join(__dirname, 'harness', 'en', f)
+    if (!fs.existsSync(enDst) && fs.existsSync(enSrc)) fs.copyFileSync(enSrc, enDst)
     const dst = path.join(HARNESS_DIR, f), src = path.join(__dirname, 'harness', f)
     if (!fs.existsSync(dst)) { fs.copyFileSync(src, dst); continue }
     // upgrade untouched copies of an older shipped version; keep the user's own edits
@@ -100,11 +110,18 @@ function ensureHarness() {
     }
   }
 }
+/** Harness file for the current language: <userData>/harness/en/<name>.md in English mode, else the Chinese one. */
+const harnessFile = (name, lang = I18N.getLang()) => {
+  const en = path.join(HARNESS_DIR, 'en', `${name}.md`)
+  return lang === 'en' && fs.existsSync(en) ? en : path.join(HARNESS_DIR, `${name}.md`)
+}
 function harness(name, vars) {
-  let t = fs.readFileSync(path.join(HARNESS_DIR, `${name}.md`), 'utf8')
+  let t = fs.readFileSync(harnessFile(name), 'utf8')
   for (const [k, v] of Object.entries(vars)) t = t.replaceAll(`{{${k}}}`, String(v))
   const self = (name === 'ceo' || name === 'hr') && agent(name)
-  if (self) t += `\n\n（你在办公室里的名字是「${self.name}」。${name === 'ceo' ? `HR 叫「${agent('hr')?.name}」` : `CEO 叫「${agent('ceo')?.name}」`}。）`
+  if (self) t += EN()
+    ? `\n\n(Your name in the office is "${shownName(self)}". ${name === 'ceo' ? `HR is "${shownName(agent('hr'))}"` : `The CEO is "${shownName(agent('ceo'))}"`}.)`
+    : `\n\n（你在办公室里的名字是「${self.name}」。${name === 'ceo' ? `HR 叫「${agent('hr')?.name}」` : `CEO 叫「${agent('ceo')?.name}」`}。）`
   return t
 }
 
@@ -145,7 +162,7 @@ function setAgent(id, patch) {
   send('office:agent', publicAgent(a))
   clearTimeout(setAgent.t); setAgent.t = setTimeout(saveState, 1500) // keep office-state.json in step with live status
 }
-const publicAgent = a => ({ ...a, effectiveModel: modelOf(a), effectiveEffort: effortOf(a) })
+const publicAgent = a => ({ ...a, name: shownName(a), title: shownTitle(a), effectiveModel: modelOf(a), effectiveEffort: effortOf(a) })
 
 // ---------- runtime ----------
 let pool
@@ -236,7 +253,8 @@ async function copyAttachments(dir, list) {
   const out = []
   const src = [...new Set([].concat(list || []).map(String).filter(Boolean))]
   if (!src.length) return out
-  const dest = path.join(dir, '附件'); fs.mkdirSync(dest, { recursive: true })
+  const attDir = L('附件', 'attachments')
+  const dest = path.join(dir, attDir); fs.mkdirSync(dest, { recursive: true })
   for (const s of src) {
     try {
       const st = fs.statSync(s)
@@ -246,7 +264,7 @@ async function copyAttachments(dir, list) {
       const to = path.join(dest, name)
       if (st.isDirectory()) await copyDir(s, to); else await fs.promises.copyFile(s, to)
       const size = st.isDirectory() ? listFiles(to).reduce((a, f) => a + f.size, 0) : st.size
-      out.push({ name, from: s, path: to, rel: `附件/${name}`, dir: st.isDirectory(), size })
+      out.push({ name, from: s, path: to, rel: `${attDir}/${name}`, dir: st.isDirectory(), size })
     } catch (err) { log(`attachment ${s} failed: ${err}`); out.push({ name: path.basename(s), from: s, error: String(err.message || err) }) }
   }
   return out
@@ -294,7 +312,7 @@ function phase(p, status, text) {
 async function runProject(p) {
   const vars = { projectDir: p.dir, projectRel: p.rel }
   const rush = () => state.rush || p.rush
-  const rushNote = () => rush() ? '\n\n【加急项目】老板要求加急：全员快速模式，抓重点，尽快交付可用成果。' : ''
+  const rushNote = () => rush() ? L('\n\n【加急项目】老板要求加急：全员快速模式，抓重点，尽快交付可用成果。', '\n\n[RUSH] The boss wants this fast: everyone in quick mode, focus on what matters, ship something usable as soon as possible.') : ''
 
   // previous staff leave
   const leaving = state.agents.filter(a => a.role === 'employee')
@@ -306,18 +324,35 @@ async function runProject(p) {
 
   // 0. "continue" an archived project: hand its folder + summary to everyone
   const prev = p.continueOf ? listProjects().find(x => x.id === p.continueOf) : null
-  const prevNote = prev ? `\n\n## 这是续作\n本项目接着已归档项目「${prev.title}」继续做。旧项目目录：${prev.dir}\n旧项目总结：${(prev.summary || '（无）').slice(0, 1500)}\n旧项目的成果文件可以直接读取、复用；新成果写到本项目目录。` : ''
-  const qaNote = () => p.qa?.length ? `\n\n## 老板的补充说明（CEO 提问、老板回答）\n${p.qa.map(x => `- 问：${x.q}\n  答：${x.a || '（老板未回答，按合理假设处理并写明）'}`).join('\n')}` : ''
+  let prevNote = prev ? `\n\n## 这是续作\n本项目接着已归档项目「${prev.title}」继续做。旧项目目录：${prev.dir}\n旧项目总结：${(prev.summary || '（无）').slice(0, 1500)}\n旧项目的成果文件可以直接读取、复用；新成果写到本项目目录。` : ''
+  let qaNote = () => p.qa?.length ? `\n\n## 老板的补充说明（CEO 提问、老板回答）\n${p.qa.map(x => `- 问：${x.q}\n  答：${x.a || '（老板未回答，按合理假设处理并写明）'}`).join('\n')}` : ''
   const okAtt = (p.attachments || []).filter(a => !a.error)
-  const attNote = okAtt.length ? `\n\n## 老板提供的附件（已复制到项目目录，请按需阅读/使用，不要修改原件）\n${okAtt.map(a => `- ${a.path}${a.dir ? '（文件夹）' : ''}，${fmtSize(a.size)}`).join('\n')}\nPDF、Word、表格、图片、音视频等可以用合适的工具或命令行读取、转写或抽帧；读不了的格式要在交付里说明。` : ''
-  const taskText = () => `标题：${p.title}\n描述：${p.brief || '（无更多描述）'}${attNote}${prevNote}${qaNote()}${rushNote()}`
+  let attNote = okAtt.length ? `\n\n## 老板提供的附件（已复制到项目目录，请按需阅读/使用，不要修改原件）\n${okAtt.map(a => `- ${a.path}${a.dir ? '（文件夹）' : ''}，${fmtSize(a.size)}`).join('\n')}\nPDF、Word、表格、图片、音视频等可以用合适的工具或命令行读取、转写或抽帧；读不了的格式要在交付里说明。` : ''
+  if (EN()) {
+    prevNote = prev ? `\n\n## This is a follow-up\nThis project continues the archived project "${prev.title}". Old project folder: ${prev.dir}\nOld project summary: ${(prev.summary || '(none)').slice(0, 1500)}\nYou may read and reuse the old project's files; write new outputs into this project's folder.` : ''
+    qaNote = () => p.qa?.length ? `\n\n## Clarifications from the boss (CEO asked, boss answered)\n${p.qa.map(x => `- Q: ${x.q}\n  A: ${x.a || '(no answer; make a reasonable assumption and state it)'}`).join('\n')}` : ''
+    attNote = okAtt.length ? `\n\n## Attachments from the boss (copied into the project folder; read/use as needed, do not modify the originals)\n${okAtt.map(a => `- ${a.path}${a.dir ? ' (folder)' : ''}, ${fmtSize(a.size)}`).join('\n')}\nPDF, Word, spreadsheets, images, audio and video can be read, transcribed or sampled with suitable tools or the command line; say so in the deliverable if a format cannot be read.` : ''
+  }
+  const taskText = () => EN()
+    ? `Title: ${p.title}\nDescription: ${p.brief || '(no further description)'}${attNote}${prevNote}${qaNote()}${rushNote()}`
+    : `标题：${p.title}\n描述：${p.brief || '（无更多描述）'}${attNote}${prevNote}${qaNote()}${rushNote()}`
 
   // 1. CEO sets the goal
   phase(p, 'goal', 'CEO 制定目标')
   setAgent('ceo', { status: 'busy', activity: T('act.newTask', { title: p.title }) })
   emit('say', { id: 'ceo', text: T('say.newTask', { title: p.title }), ms: 2500 })
   emit('work-start', { id: 'ceo' })
-  const goalPrompt = `${harness('ceo', vars)}
+  const goalJson = L('{"goal":"一段话的项目目标","scope":["交付物1","交付物2"],"acceptance":["验收标准1","验收标准2"],"toHr":"一句话交代给 HR 的话"}',
+    '{"goal":"the project goal in one paragraph","scope":["deliverable 1","deliverable 2"],"acceptance":["criterion 1","criterion 2"],"toHr":"one sentence for HR"}')
+  const goalPrompt = EN() ? `${harness('ceo', vars)}
+
+## Now: set the goal
+The boss's task:
+${taskText()}
+
+Define this project's goal, deliverable scope and acceptance criteria, then hand it to HR to hire and split the work. ${prev ? 'You may read the old project folder first to see where it stands.' : 'Look at related files in the workspace if needed.'}
+Output strict JSON:
+${goalJson}` : `${harness('ceo', vars)}
 
 ## 现在：制定目标
 老板的任务：
@@ -325,8 +360,15 @@ ${taskText()}
 
 请明确本项目的目标、交付范围和验收标准，交给 HR 去招人分工。${prev ? '可以先读旧项目目录了解进度。' : '需要时可以查看工作区里的相关文件。'}
 输出严格 JSON：
-{"goal":"一段话的项目目标","scope":["交付物1","交付物2"],"acceptance":["验收标准1","验收标准2"],"toHr":"一句话交代给 HR 的话"}`
-  const askRule = `
+${goalJson}`
+  const askRule = EN() ? `
+
+## Ask the boss first if something is unclear
+If key information in the task is unclear, would clearly change the outcome, and cannot be found in the workspace or the old project (e.g. an ambiguous reference, audience, format, style, length, deadline), you may ask the boss instead of guessing.
+- At most 3 questions, each concrete and easy to answer, ideally with 2-4 options.
+- Do not ask about small things you can reasonably assume.
+- To ask, output only: {"questions":[{"q":"question","options":["option A","option B"]}]}
+- If no questions are needed, output the goal JSON directly.` : `
 
 ## 不清楚可以先问老板
 如果任务里有关键信息不清楚、会明显影响成果方向，而且无法从工作区或旧项目里查到（例如：指代不明的编号/名称、目标受众、交付格式、风格、篇幅、截止要求），你可以先向老板提问，而不是瞎猜。
@@ -346,7 +388,15 @@ ${taskText()}
       emit('say', { id: 'ceo', text: answers ? T('say.thanks') : T('say.assume'), ms: 2500 })
       setAgent('ceo', { status: 'busy', activity: T('act.makingGoal') })
       phase(p, 'goal', 'CEO 制定目标')
-      out = parseJson(await runAgent(agent('ceo'), 'goal2', `${harness('ceo', vars)}
+      out = parseJson(await runAgent(agent('ceo'), 'goal2', EN() ? `${harness('ceo', vars)}
+
+## Now: set the goal
+The boss's task:
+${taskText()}
+
+Define this project's goal, deliverable scope and acceptance criteria. Do not ask again.
+Output strict JSON:
+${goalJson}` : `${harness('ceo', vars)}
 
 ## 现在：制定目标
 老板的任务：
@@ -354,17 +404,21 @@ ${taskText()}
 
 请明确本项目的目标、交付范围和验收标准。不要再提问。
 输出严格 JSON：
-{"goal":"一段话的项目目标","scope":["交付物1","交付物2"],"acceptance":["验收标准1","验收标准2"],"toHr":"一句话交代给 HR 的话"}`, rush()))
+${goalJson}`, rush()))
     }
     goal = out
     if (!goal.goal) throw new Error('empty goal')
   } catch (err) {
     log(`CEO goal fallback: ${err}`)
-    goal = { goal: `${p.title}：${p.brief || ''}`, scope: [], acceptance: ['成果文件齐全、可直接使用'], toHr: '按任务招人分工吧。' }
+    goal = EN()
+      ? { goal: `${p.title}: ${p.brief || ''}`, scope: [], acceptance: ['All deliverable files are present and usable as is'], toHr: 'Please hire and split the work for this task.' }
+      : { goal: `${p.title}：${p.brief || ''}`, scope: [], acceptance: ['成果文件齐全、可直接使用'], toHr: '按任务招人分工吧。' }
   }
   goal.scope = [].concat(goal.scope || []).map(String); goal.acceptance = [].concat(goal.acceptance || []).map(String)
   p.goal = goal; saveProject(p)
-  const goalText = `目标：${goal.goal}\n交付范围：\n${goal.scope.map(s => `- ${s}`).join('\n') || '- （未列出）'}\n验收标准：\n${goal.acceptance.map(s => `- ${s}`).join('\n')}`
+  const goalText = EN()
+    ? `Goal: ${goal.goal}\nScope:\n${goal.scope.map(s => `- ${s}`).join('\n') || '- (not listed)'}\nAcceptance criteria:\n${goal.acceptance.map(s => `- ${s}`).join('\n')}`
+    : `目标：${goal.goal}\n交付范围：\n${goal.scope.map(s => `- ${s}`).join('\n') || '- （未列出）'}\n验收标准：\n${goal.acceptance.map(s => `- ${s}`).join('\n')}`
 
   // CEO walks to HR with the brief
   phase(p, 'hiring', 'CEO 把目标交给 HR')
@@ -376,7 +430,16 @@ ${taskText()}
   // 2. HR hires + divides work + schedules
   setAgent('hr', { status: 'busy', activity: T('act.hrPlanning') })
   emit('hr-hiring', {})
-  const hrPrompt = `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+  const hrPrompt = EN() ? `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+
+## This task
+${taskText()}
+
+## The CEO's goal
+${goalText}
+
+Hire, assign and schedule the work. Output format (strict JSON):
+{"team":[{"name":"English first name","title":"job title","skills":"core skills","task":"detailed sub-task: what to do, what to deliver, quality bar","deliverable":"main deliverable file name, e.g. 02-market-research.md","after":["names of colleagues who must finish first, or []"]}],"note":"one sentence on the hiring and scheduling plan","kickoff":"one opening line for the kickoff meeting"}` : `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
 
 ## 本次任务
 ${taskText()}
@@ -395,7 +458,10 @@ ${goalText}
     if (hrPlan.note) emit('say', { id: 'hr', text: hrPlan.note, ms: 5000 })
   } catch (err) {
     log(`HR fallback: ${err}`)
-    team = [
+    team = EN() ? [
+      { name: 'Ivy', title: 'Researcher', skills: 'research, analysis', task: `Research and analyse "${p.title}"`, deliverable: '01-research.md', after: [] },
+      { name: 'Max', title: 'Producer', skills: 'execution, writing', task: `Produce the main output for "${p.title}" based on the research`, deliverable: '02-main-output.md', after: ['Ivy'] },
+    ] : [
       { name: '小研', title: '研究员', skills: '调研、分析', task: `围绕「${p.title}」做调研与分析`, deliverable: '01-调研分析.md', after: [] },
       { name: '小创', title: '执行专员', skills: '方案落地、写作', task: `基于调研产出「${p.title}」的主要成果`, deliverable: '02-主要成果.md', after: ['小研'] },
     ]
@@ -453,13 +519,29 @@ ${goalText}
   const approved = new Map() // id -> final report record
   const parseStatus = text => {
     const first = (text || '').trim().split('\n')[0]
-    if (/受阻/.test(first)) return 'blocked'
-    if (/部分完成/.test(first)) return 'partial'
-    if (/完成/.test(first)) return 'done'
+    if (/受阻|blocked/i.test(first)) return 'blocked'
+    if (/部分完成|partial/i.test(first)) return 'partial'
+    if (/完成|done/i.test(first)) return 'done'
     return 'done'
   }
-  const handoff = h => h.deps.length ? `\n\n## 上游交接（已通过 HR 审核）\n${h.deps.map(id => { const r = approved.get(id); return `### ${r.name}（${r.title}）→ ${p.rel}/${r.deliverable}\n${r.report}` }).join('\n\n')}\n\n请先阅读上游成果文件，与之保持一致。` : ''
-  const reviewPrompt = (h, rec, round) => `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+  const handoff = h => h.deps.length ? (EN()
+    ? `\n\n## Upstream handover (passed HR review)\n${h.deps.map(id => { const r = approved.get(id); return `### ${r.name} (${r.title}) -> ${p.rel}/${r.deliverable}\n${r.report}` }).join('\n\n')}\n\nRead the upstream output files first and stay consistent with them.`
+    : `\n\n## 上游交接（已通过 HR 审核）\n${h.deps.map(id => { const r = approved.get(id); return `### ${r.name}（${r.title}）→ ${p.rel}/${r.deliverable}\n${r.report}` }).join('\n\n')}\n\n请先阅读上游成果文件，与之保持一致。`) : ''
+  const reviewPrompt = (h, rec, round) => EN() ? `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+
+## Now: review the report
+Project goal:
+${goalText}
+
+Employee: ${h.name} (${h.title})
+Assigned sub-task: ${h.task}
+Main deliverable: ${p.rel}/${h.deliverable}
+Submission ${round + 1}, self-reported status: ${rec.status}
+Employee report:
+${rec.report}
+
+Check the outputs in the project folder (read only, do not edit files) and decide whether it passes. ${round >= MAX_REWORK ? 'This is the last chance: unless it is completely unusable, pass it and put the open issues in your comment.' : ''}
+Output strict JSON: {"pass":true,"comment":"one-sentence review (on a fail, say exactly what to change)"}` : `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
 
 ## 现在：审核汇报
 项目目标：
@@ -480,7 +562,21 @@ ${rec.report}
     for (let round = 0; ; round++) {
       setAgent(h.id, { status: 'busy', activity: round ? T('act.rework', { n: round }) : T('act.startWork') })
       emit('work-start', { id: h.id })
-      const prompt = `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}
+      const prompt = EN() ? `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}
+
+## Project
+${taskText()}
+
+## Project goal (CEO)
+${goalText}
+
+## Team assignments (for reference; only do your own part)
+${p.assignments.map(x => `- ${x.name} (${x.title}): ${x.task} -> ${x.deliverable}${x.after.length ? ` (after ${x.after.join(', ')})` : ''}`).join('\n')}
+
+## Your sub-task (from HR)
+${h.task}${handoff(h)}${feedback ? `\n\n## HR sent it back (rework accordingly; edit the existing files)\n${feedback}` : ''}
+
+Start working now and write your output to ${p.rel}/${h.deliverable}.` : `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}
 
 ## 项目
 ${taskText()}
@@ -496,18 +592,18 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
 
 请直接开始工作，把成果写入 ${p.rel}/${h.deliverable}。`
       let report, ok = true
-      try { report = await runAgent(h, round ? `rework${round}` : 'work', prompt, rush()) } catch (err) { ok = false; report = `状态：受阻\n出错了：${String(err.message || err).slice(0, 300)}` }
-      report = (report || '状态：完成\n已完成。').trim()
+      try { report = await runAgent(h, round ? `rework${round}` : 'work', prompt, rush()) } catch (err) { ok = false; report = L(`状态：受阻\n出错了：`, `Status: blocked\nError: `) + String(err.message || err).slice(0, 300) }
+      report = (report || L('状态：完成\n已完成。', 'Status: done\nDone.')).trim()
       const rec = { id: h.id, name: h.name, title: h.title, ok, status: ok ? parseStatus(report) : 'blocked', report, deliverable: h.deliverable, round, at: Date.now() }
 
       // walk to HR and report
       setAgent(h.id, { status: 'reporting', activity: T('act.goReport') })
-      emit('report', { id: h.id, to: 'hr', text: report.replace(/^状态：\S+\s*/, ''), status: rec.status, ok })
+      emit('report', { id: h.id, to: 'hr', text: report.replace(/^(状态：\S+|Status:\s*\S+)\s*/i, ''), status: rec.status, ok })
       setAgent('hr', { status: 'busy', activity: T('act.hrReviewing', { name: h.name }) })
       let verdict
       try {
         verdict = parseJson(await runAgent(agent('hr'), `review-${h.name}-${round}`, reviewPrompt(h, rec, round), rush()))
-      } catch (err) { log(`HR review fallback: ${err}`); verdict = { pass: true, comment: '（审核失败，默认通过）' } }
+      } catch (err) { log(`HR review fallback: ${err}`); verdict = { pass: true, comment: L('（审核失败，默认通过）', '(review failed, passed by default)') } }
       const pass = verdict.pass !== false || round >= MAX_REWORK
       rec.review = { pass, comment: String(verdict.comment || '') }
       p.reports.push(rec); saveProject(p)
@@ -533,7 +629,7 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
         started.add(h.id)
         const job = work(h).catch(err => {
           log(`work ${h.id} crashed: ${err.stack || err}`)
-          approved.set(h.id, { id: h.id, name: h.name, title: h.title, ok: false, status: 'blocked', report: '流程异常', deliverable: h.deliverable })
+          approved.set(h.id, { id: h.id, name: h.name, title: h.title, ok: false, status: 'blocked', report: L('流程异常', 'Workflow error'), deliverable: h.deliverable })
         }).finally(() => { running.delete(job); next() })
         running.add(job)
       }
@@ -551,8 +647,23 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
   setAgent('ceo', { status: 'busy', activity: T('act.accepting') })
   emit('work-start', { id: 'ceo' })
   const finals = hires.map(h => approved.get(h.id)).filter(Boolean)
-  const tag = s => ({ done: '完成', partial: '部分完成', blocked: '受阻' })[s] || s
-  const finalPrompt = `${harness('ceo', vars)}
+  const tag = s => (EN() ? { done: 'done', partial: 'partial', blocked: 'blocked' } : { done: '完成', partial: '部分完成', blocked: '受阻' })[s] || s
+  const finalPrompt = EN() ? `${harness('ceo', vars)}
+
+## Now: final acceptance
+The boss's task:
+${taskText()}
+
+Your goal:
+${goalText}
+
+Employee deliveries after HR review:
+${finals.map(r => `### ${r.name} (${r.title}) - ${tag(r.status)}${r.review ? ` - HR comment: ${r.review.comment}` : ''}\nDeliverable: ${p.rel}/${r.deliverable}\n${r.report}`).join('\n\n')}
+
+Please:
+1. Check the outputs in ${p.rel} against each acceptance criterion; only make small fixes (transitions, typos, formatting), do not redo the employees' work.
+2. Write ${p.rel}/00-project-summary.md: goal, team and roles, key points of each output with file links, acceptance verdict (mark each criterion met / not met), open issues and next steps.
+3. Your last reply reports to the boss in 3 sentences; the first sentence is the acceptance verdict.` : `${harness('ceo', vars)}
 
 ## 现在：最终验收
 老板的任务：
@@ -569,7 +680,7 @@ ${finals.map(r => `### ${r.name}（${r.title}）· ${tag(r.status)}${r.review ? 
 2. 写出 ${p.rel}/00-项目总结.md：项目目标、团队与分工、每份成果的要点与文件链接、验收结论（逐条标注达标/未达标）、遗留问题与后续建议。
 3. 最后一条回复用 3 句话向老板汇报，第一句写验收结论。`
   let summary
-  try { summary = await runAgent(agent('ceo'), 'final', finalPrompt, rush()) } catch (err) { summary = `验收失败：${err.message || err}` }
+  try { summary = await runAgent(agent('ceo'), 'final', finalPrompt, rush()) } catch (err) { summary = L('验收失败：', 'Acceptance failed: ') + (err.message || err) }
   p.summary = (summary || '').trim()
   emit('say', { id: 'ceo', text: p.summary.slice(0, 80) || T('say.done'), ms: 6000 })
   setAgent('ceo', { status: 'busy', activity: T('act.archiving') })
@@ -606,10 +717,10 @@ const fileRec = f => ({ rel: f.rel, path: f.path, size: f.size, mtime: f.mtime }
 
 /** The project's main outputs: summary first, then each employee's deliverable, then everything else. */
 function productsOf(p) {
-  const all = listFiles(p.dir).filter(f => !f.rel.startsWith('附件/'))
+  const all = listFiles(p.dir).filter(f => !/^(附件|attachments)\//.test(f.rel))
   const base = r => r.split('/').pop()
   const used = new Set()
-  const summary = all.find(f => /(^|\/)00-.*总结/.test(f.rel)) || all.find(f => /总结/.test(f.rel)) || null
+  const summary = all.find(f => /(^|\/)00-.*(总结|summary)/i.test(f.rel)) || all.find(f => /总结|project-summary/i.test(f.rel)) || null
   if (summary) used.add(summary.rel)
   const main = []
   for (const d of (p.assignments || []).map(a => a.deliverable).filter(Boolean)) {
@@ -623,6 +734,26 @@ function productsOf(p) {
 function chatContextPrompt(p, history) {
   const prods = productsOf(p)
   const names = [prods.summary, ...prods.main, ...prods.others].filter(Boolean).slice(0, 60)
+  if (EN()) {
+    const goalEn = p.goal ? `${p.goal.goal || ''}${p.goal.acceptance?.length ? `\nAcceptance criteria: ${p.goal.acceptance.join('; ')}` : ''}` : '(none)'
+    const talkEn = history.slice(-16).map(m => `${m.role === 'user' ? 'Boss' : 'You (CEO)'}: ${String(m.text).slice(0, 800)}`).join('\n\n')
+    return `${harness('ceo', { projectDir: p.dir, projectRel: p.rel })}
+
+## Now: project chat
+The project "${p.title}" has ${p.status === 'done' ? 'been accepted and archived' : 'ended (not fully successful)'}, and the boss wants to keep talking about it. No JSON in this step: answer in natural language, in the language the boss uses, concise and concrete.
+- Project folder: ${p.dir}
+- The boss's original task: ${p.brief || '(no further description)'}
+- Project goal: ${goalEn}
+- Your last acceptance report: ${(p.summary || '(none)').slice(0, 3000)}
+- Project files (relative to the project folder):
+${names.map(f => `  - ${f.rel}`).join('\n') || '  (none yet)'}
+${talkEn ? `\nEarlier conversation:\n${talkEn}\n` : ''}
+Rules:
+1. When the boss asks about content, wants an explanation or comparison, read the files first; do not answer from memory.
+2. When the boss asks to change, extend or redo an output, edit the files in the project folder directly (or create new ones), then say which files you changed.
+3. When you mention a file, use its path relative to the project folder (e.g. 02-main-output.md) so the boss can click it.
+4. Do not modify the originals in the attachments folder.`
+  }
   const goal = p.goal ? `${p.goal.goal || ''}${p.goal.acceptance?.length ? `\n验收标准：${p.goal.acceptance.join('；')}` : ''}` : '（无）'
   const talk = history.slice(-16).map(m => `${m.role === 'user' ? '老板' : '你（CEO）'}：${String(m.text).slice(0, 800)}`).join('\n\n')
   return `${harness('ceo', { projectDir: p.dir, projectRel: p.rel })}
@@ -662,7 +793,7 @@ async function chatSend(id, input) {
     let sess = chatSessions.get(id)
     const fresh = !sess || sess.rt !== rt
     if (fresh) { sess = { sid: `ceo-chat-${crypto.randomBytes(5).toString('hex')}`, rt }; chatSessions.set(id, sess) }
-    const prompt = fresh ? `${chatContextPrompt(p, history.slice(0, -1))}\n\n## 老板说\n${text}` : text
+    const prompt = fresh ? `${chatContextPrompt(p, history.slice(0, -1))}\n\n${L('## 老板说', '## The boss says')}\n${text}` : text
     const sig = list => new Map(list.map(f => [f.rel, `${f.size}:${Math.round(f.mtime)}`]))
     const before = sig(listFiles(p.dir))
     if (solo) setAgent('ceo', { status: 'busy', activity: T('act.chatting') })
@@ -831,8 +962,8 @@ ipcMain.handle('office:testModel', async (_e, req) => {
 ipcMain.handle('office:rename', (_e, id, name) => {
   const a = agent(id); if (!a) return null
   const n = String(name || '').trim().slice(0, 12)
-  if (!n || n === a.name) return publicAgent(a)
-  const old = a.name; a.name = n; saveState()
+  if (!n || n === shownName(a)) return publicAgent(a)
+  const old = shownName(a); a.name = n; saveState()
   setAgent(id, { activity: T('act.rename', { old, n }) })
   return publicAgent(a)
 })
@@ -848,7 +979,11 @@ function assertRef(ref) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new Error(T('err.invalidRef', { ref }))
   return ref
 }
-ipcMain.handle('office:setLang', (_e, lang) => { I18N.setLang(lang); return I18N.getLang() })
+ipcMain.handle('office:setLang', (_e, lang) => {
+  I18N.setLang(lang)
+  for (const a of state.agents) send('office:agent', publicAgent(a)) // default names/titles follow the language
+  return I18N.getLang()
+})
 ipcMain.handle('office:saveProvider', async (_e, route, p, apiKey, models) => {
   if (current) throw new Error(T('err.projectBusy'))
   if (!prov.ROUTE_PATTERN.test(route)) throw new Error(T('err.routePattern'))
@@ -933,10 +1068,10 @@ ipcMain.handle('office:readFile', (_e, file) => {
 ipcMain.handle('office:open', (_e, p) => shell.openPath(p))
 ipcMain.handle('office:reveal', (_e, p) => shell.showItemInFolder(p))
 ipcMain.handle('office:harnessDir', () => shell.openPath(HARNESS_DIR))
-ipcMain.handle('office:harness', (_e, name) => fs.readFileSync(path.join(HARNESS_DIR, `${name}.md`), 'utf8'))
+ipcMain.handle('office:harness', (_e, name) => fs.readFileSync(harnessFile(name), 'utf8'))
 ipcMain.handle('office:saveHarness', (_e, name, text) => {
   if (!['ceo', 'hr', 'employee'].includes(name)) throw new Error('bad harness')
-  fs.writeFileSync(path.join(HARNESS_DIR, `${name}.md`), text, 'utf8'); return true
+  fs.writeFileSync(harnessFile(name), text, 'utf8'); return true
 })
 ipcMain.handle('office:pickFiles', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'], title: T('dlg.pickAtts') })
@@ -979,7 +1114,8 @@ app.whenReady().then(() => {
     title: 'DSH Office', icon: process.platform === 'win32' ? path.join(__dirname, 'icon.ico') : path.join(__dirname, 'icon.png'), show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: false },
   })
-  win.once('ready-to-show', () => win.show())
+  // DSH_OFFICE_HEADLESS=1 keeps the window hidden (automated screenshots / UI audits).
+  if (process.env.DSH_OFFICE_HEADLESS !== '1') win.once('ready-to-show', () => win.show())
   win.webContents.on('console-message', (e) => {
     const lvl = e.level ?? 'info'
     if (lvl === 'error' || lvl === 'warning' || lvl === 2 || lvl === 3) log(`renderer ${lvl}: ${e.message} @${e.sourceId}:${e.lineNumber}`)

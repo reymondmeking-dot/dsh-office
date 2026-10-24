@@ -540,7 +540,7 @@
     list.append(overview)
     files.sort((a, b) => a.rel.localeCompare(b.rel, lang === 'zh' ? 'zh' : 'en'))
     for (const f of files) {
-      const el = document.createElement('div'); el.className = `file ${/总结/.test(f.rel) ? 'summary' : ''}`
+      const el = document.createElement('div'); el.className = `file ${/总结|summary/i.test(f.rel) ? 'summary' : ''}`
       const ext = f.rel.split('.').pop().toLowerCase()
       const ico = { md: '📝', txt: '📄', html: '🌐', py: '🐍', js: '📜', ts: '📜', json: '🧾', csv: '📊', xlsx: '📊', docx: '📘', pptx: '📙', png: '🖼️', jpg: '🖼️', svg: '🖼️', pdf: '📕' }[ext] || '📄'
       el.innerHTML = `<span>${ico}</span><span class="fn" title="${esc(f.rel)}">${esc(f.rel)}</span><span class="sz">${f.size > 1024 ? `${(f.size / 1024).toFixed(1)}K` : `${f.size}B`}</span>`
@@ -812,7 +812,7 @@
       const models = settings.models.filter(m => m.provider === route)
       const key = pinfo?.keys?.[p.apiKeyEnv]
       const card = document.createElement('div'); card.className = 'prov-card'
-      card.innerHTML = `<div class="pc-head"><b>${esc(p.displayName || route)}</b><code>${esc(route)}</code><span class="chip ${key ? 'ok' : 'warn'}">${key ? t('imp.keyMask', { mask: esc(key) }) : t('prov.noKey')}</span><div class="spacer"></div><button class="pill-btn">${t('prov.edit')}</button></div>
+      card.innerHTML = `<div class="pc-head"><b>${esc(I18N.providerName(p.displayName || route, lang))}</b><code>${esc(route)}</code><span class="chip ${key ? 'ok' : 'warn'}">${key ? t('imp.keyMask', { mask: esc(key) }) : t('prov.noKey')}</span><div class="spacer"></div><button class="pill-btn">${t('prov.edit')}</button></div>
         <div class="pc-sub">${esc(p.api)} · ${esc(p.baseURL)}</div>
         <div class="pc-models">${models.map(m => `<span class="pc-model" data-k="${esc(m.key)}"><img src="${S.fruitURL(m.fruit, 20)}" />${esc(m.name)}<small>${esc(effortSummary(m.efforts))}</small><button class="pc-test">${t('prov.test')}</button><small class="test-res"></small></span>`).join('')}</div>`
       card.querySelector('button').onclick = () => openProvider(route)
@@ -828,7 +828,7 @@
       box.append(card)
     }
     for (const m of settings.models.filter(m => m.engine !== 'codex' && !settings.providers?.[m.provider])) {
-      box.insertAdjacentHTML('beforeend', `<div class="prov-card"><div class="pc-head"><b>${esc(m.provider)}</b><span class="chip">${t('prov.builtin')}</span></div><div class="pc-models"><span class="pc-model"><img src="${S.fruitURL(m.fruit, 20)}" />${esc(m.name)}</span></div></div>`)
+      box.insertAdjacentHTML('beforeend', `<div class="prov-card"><div class="pc-head"><b>${esc(I18N.providerName(m.provider, lang))}</b><span class="chip">${t('prov.builtin')}</span></div><div class="pc-models"><span class="pc-model"><img src="${S.fruitURL(m.fruit, 20)}" />${esc(m.name)}</span></div></div>`)
     }
   }
   $('#set-addprov').onclick = () => openProvider(null)
@@ -904,7 +904,7 @@
     const p = route ? settings.providers[route] : null
     pv = { existing: !!p, route: route || '', apiKeyEnv: p?.apiKeyEnv, models: route ? settings.models.filter(m => m.provider === route).map(m => ({ ...m, efforts: [...(m.efforts || [])] })) : [] }
     $('#prov-modal').classList.remove('hidden'); $('#pv-msg').textContent = ''; $('#pv-found').classList.add('hidden')
-    $('#pv-head').textContent = p ? t('prov.headEdit', { name: p.displayName || route }) : t('prov.headAdd')
+    $('#pv-head').textContent = p ? t('prov.headEdit', { name: I18N.providerName(p.displayName || route, lang) }) : t('prov.headAdd')
     $('#pv-route').value = route || ''; $('#pv-route').disabled = !!p
     $('#pv-name').value = p?.displayName || ''
     $('#pv-api').innerHTML = (pinfo?.protocols || ['openai-completions', 'openai-responses', 'anthropic-messages']).map(x => `<option>${x}</option>`).join('')
@@ -914,7 +914,7 @@
     $('#pv-del').classList.toggle('hidden', !p)
     const imp = (pinfo?.dsh || []).filter(x => !settings.providers?.[x.route])
     $('#pv-import-wrap').classList.toggle('hidden', !!p || !imp.length)
-    $('#pv-import').innerHTML = `<option value="">${t('prov.importOpt')}</option>` + imp.map(x => `<option value="${esc(x.route)}">${esc(x.displayName)}（${esc(x.route)}）</option>`).join('')
+    $('#pv-import').innerHTML = `<option value="">${t('prov.importOpt')}</option>` + imp.map(x => `<option value="${esc(x.route)}">${esc(I18N.providerName(x.displayName, lang))}${lang === 'en' ? ' (' : '（'}${esc(x.route)}${lang === 'en' ? ')' : '）'}</option>`).join('')
     keyHint(); renderPvModels()
   }
   function keyHint() {
@@ -1136,7 +1136,7 @@
       return `<label class="imp-row">
         <input type="checkbox" data-id="${esc(rec.id)}" checked />
         <div class="imp-main">
-          <div class="imp-line"><b>${esc(rec.displayName)}</b><code>${esc(rec.route)}</code><span class="chip">${esc(rec.api)}</span><span class="chip ${rec.hasKey ? 'ok' : 'warn'}">${rec.hasKey ? t('imp.keyMask', { mask: esc(rec.keyMask || '') }) : t('imp.credReuse')}</span><span class="chip">${t('imp.modelCount', { n: rec.models.length })}</span></div>
+          <div class="imp-line"><b>${esc(I18N.providerName(rec.displayName, lang))}</b><code>${esc(rec.route)}</code><span class="chip">${esc(rec.api)}</span><span class="chip ${rec.hasKey ? 'ok' : 'warn'}">${rec.hasKey ? t('imp.keyMask', { mask: esc(rec.keyMask || '') }) : t('imp.credReuse')}</span><span class="chip">${t('imp.modelCount', { n: rec.models.length })}</span></div>
           <div class="imp-sub">${esc(rec.baseURL)}</div>
           ${rec.models.length ? `<div class="imp-models">${models.map(m => `<small title="${esc(t('imp.limitsTitle'))}">${esc(m.id)} <i>${m.contextWindow ? fmtK(m.contextWindow) : esc(t('ctx.unknown'))}${m.maxTokens ? '/' + fmtK(m.maxTokens) : ''}</i></small>`).join('')}${more > 0 ? `<small>${t('imp.more', { n: more })}</small>` : ''}</div>` : `<div class="hint">${t('imp.autoFetch')}</div>`}
           <div class="hint">${esc(rec.origin)} · ${esc(rec.keyFrom || t('imp.credSaved'))}${rec.otherSources.length ? t('imp.alsoIn', { sources: esc(andJoin(rec.otherSources)) }) : ''}</div>

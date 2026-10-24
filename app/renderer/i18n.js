@@ -949,5 +949,21 @@
     if (/^失败：/.test(text)) return 'Failed: ' + text.slice(3)
     return text
   }
-  return { zh, en, makeT, t, phaseText, setLang(l) { current = l === 'en' ? 'en' : 'zh' }, getLang: () => current }
+  /** Provider display names: keep brand names, but drop the Chinese part in English mode
+   *  (e.g. "火山方舟 ARK" -> "ARK", "火山方舟" -> "Volcengine Ark"). */
+  const PROVIDER_EN = {
+    '火山方舟': 'Volcengine Ark', '阿里云百炼': 'Alibaba Cloud Model Studio', '智谱': 'Zhipu', '硅基流动': 'SiliconFlow',
+    '商汤': 'SenseTime', '阶跃星辰': 'StepFun', '百川': 'Baichuan', '腾讯混元': 'Tencent Hunyuan', '月之暗面': 'Moonshot',
+    '豆包': 'Doubao', '通义千问': 'Qwen', '深度求索': 'DeepSeek',
+  }
+  function providerName(name, lang) {
+    const s = String(name || '')
+    if ((lang || current) !== 'en' || !/[\u4e00-\u9fff]/.test(s)) return s
+    for (const [zh, en] of Object.entries(PROVIDER_EN)) if (s.trim() === zh) return en
+    const latin = s.replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (latin) return latin
+    for (const [zh, en] of Object.entries(PROVIDER_EN)) if (s.includes(zh)) return en
+    return s
+  }
+  return { zh, en, makeT, t, phaseText, providerName, setLang(l) { current = l === 'en' ? 'en' : 'zh' }, getLang: () => current }
 })
