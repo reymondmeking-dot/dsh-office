@@ -27,7 +27,7 @@
     I18N.setLang(lang); api.setLang(lang).catch(() => {})
     applyStaticI18n()
     setStatus(); renderTopEffort(); renderFruits(); fillDefault()
-    if (!$('#settings-modal').classList.contains('hidden')) { renderProviders(); renderContextBudget(); $('#set-harness').options[0].textContent = `CEO ${agents.get('ceo')?.name || ''}`; $('#set-harness').options[1].textContent = `HR ${agents.get('hr')?.name || ''}` }
+    if (!$('#settings-modal').classList.contains('hidden')) { renderProviders(); renderContextBudget(); renderCodex(); $('#set-harness').options[0].textContent = `CEO ${agents.get('ceo')?.name || ''}`; $('#set-harness').options[1].textContent = `HR ${agents.get('hr')?.name || ''}` }
     if (!$('#prov-modal').classList.contains('hidden') && pv) { openProvider(pv.existing ? pv.route : null); if (!pv.existing) { $('#pv-route').value = pv.route; $('#pv-url').value = '' } }
     if (!$('#imp-modal').classList.contains('hidden')) renderImport()
     if (!$('#chat-modal').classList.contains('hidden') && chat) { fillChatProjects(chatable(), chat.id); renderChat() }
@@ -754,6 +754,7 @@
     pinfo = await api.providerInfo().catch(() => null)
     renderProviders()
     renderContextBudget()
+    renderCodex(); scanCodex()
   }
   const tokenText = n => Number(n) > 0 ? Number(n).toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN') : t('ctx.unknown')
   const sourceText = source => source ? t('ctx.source.' + source) : t('ctx.unknown')
@@ -826,11 +827,45 @@
       }
       box.append(card)
     }
-    for (const m of settings.models.filter(m => !settings.providers?.[m.provider])) {
+    for (const m of settings.models.filter(m => m.engine !== 'codex' && !settings.providers?.[m.provider])) {
       box.insertAdjacentHTML('beforeend', `<div class="prov-card"><div class="pc-head"><b>${esc(m.provider)}</b><span class="chip">${t('prov.builtin')}</span></div><div class="pc-models"><span class="pc-model"><img src="${S.fruitURL(m.fruit, 20)}" />${esc(m.name)}</span></div></div>`)
     }
   }
   $('#set-addprov').onclick = () => openProvider(null)
+
+  // ---------- Codex CLI as an employee engine ----------
+  let codexInfo = null
+  const codexMsg = x => { $('#codex-msg').textContent = x || '' }
+  function renderCodex() {
+    const st = $('#codex-state'), box = $('#codex-models'), r = codexInfo
+    const added = new Set(settings.models.filter(m => m.engine === 'codex').map(m => m.model))
+    $('#codex-remove').classList.toggle('hidden', !added.size)
+    if (!r) { st.className = 'chip'; st.textContent = t('codex.unknown'); box.innerHTML = ''; return }
+    if (!r.found) { st.className = 'chip warn'; st.textContent = t('codex.notFound'); box.innerHTML = `<div class="hint">${t('codex.installHint')}</div>`; $('#codex-add').disabled = true; return }
+    st.className = `chip ${r.loggedIn ? 'ok' : 'warn'}`
+    st.textContent = `v${r.version || '?'} · ${r.loggedIn ? t('codex.loggedIn') : t('codex.notLoggedIn')}`
+    $('#codex-add').disabled = !r.models.length
+    const list = r.models.filter(m => m.visible || added.has(m.slug) || m.slug === r.configModel)
+    box.innerHTML = (r.loggedIn ? '' : `<div class="hint warn-t">${t('codex.loginHint')}</div>`)
+      + (list.length ? list.map(m => `<label class="codex-row"><input type="checkbox" data-slug="${esc(m.slug)}" ${added.has(m.slug) || (!added.size && m.slug === r.configModel) ? 'checked' : ''} /><b>${esc(m.name)}</b><code>${esc(m.slug)}</code>${m.contextWindow ? `<span class="chip">${fmtK(m.contextWindow)}</span>` : ''}<small>${esc(effortSummary(m.efforts.filter(e => ['low', 'medium', 'high', 'xhigh', 'max'].includes(e))))}</small>${m.slug === r.configModel ? `<span class="chip ok">${t('codex.current')}</span>` : ''}${added.has(m.slug) ? `<span class="chip">${t('codex.added')}</span>` : ''}</label>`).join('') : `<div class="hint">${t('codex.noModels')}</div>`)
+  }
+  async function scanCodex() {
+    codexMsg(t('codex.scanning'))
+    try { codexInfo = await api.codexScan(); codexMsg('') } catch (e) { codexMsg(errText(e)) }
+    renderCodex()
+  }
+  $('#codex-scan').onclick = scanCodex
+  $('#codex-add').onclick = async () => {
+    const slugs = [...document.querySelectorAll('#codex-models input[data-slug]:checked')].map(x => x.dataset.slug)
+    if (!slugs.length) return codexMsg(t('err.codexPick'))
+    const b = $('#codex-add'); b.disabled = true
+    try { settings = await api.codexImport(slugs); await afterModelsChanged(); codexInfo = await api.codexScan(); renderCodex(); toast(t('codex.addedToast', { n: slugs.length })); codexMsg('') }
+    catch (e) { codexMsg(errText(e)) } finally { b.disabled = false }
+  }
+  $('#codex-remove').onclick = async () => {
+    if (!confirm(t('codex.removeConfirm'))) return
+    try { settings = await api.codexRemove(); await afterModelsChanged(); codexInfo = await api.codexScan(); renderCodex(); codexMsg('') } catch (e) { codexMsg(errText(e)) }
+  }
 
   // ---------- provider editor (DSH custom-provider card semantics) ----------
   const ROUTE_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/

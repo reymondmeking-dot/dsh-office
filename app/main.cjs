@@ -10,6 +10,7 @@ const { RuntimePool } = require('./runtime.cjs')
 const parameters = require('./parameters.js')
 const prov = require('./providers.cjs')
 const agents = require('./agents.cjs')
+const codexCli = require('./codex.cjs')
 const I18N = require('./renderer/i18n.js')
 const T = (k, v) => I18N.t(k, v)
 const jn = a => a.join(I18N.getLang() === 'en' ? ', ' : '、')
@@ -771,6 +772,53 @@ ipcMain.handle('office:scanAgents', () => {
   result.dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
   log(`scanAgents: ${result.records.length} records from ${result.sources.length} sources in ${Date.now() - started}ms`)
   return result
+})
+/** Codex CLI as an employee engine: detect the install, list the account's models, add them as fruits. */
+const FRUIT_KEYS = ['orange', 'grape', 'apple', 'cherry', 'peach', 'lemon', 'strawberry', 'watermelon', 'banana', 'pear']
+ipcMain.handle('office:codexScan', async () => {
+  const r = await codexCli.scanCodexCli({ codexPath: settings.codexPath, node: pool.node })
+  r.added = settings.models.filter(m => m.engine === 'codex').map(m => m.model)
+  return r
+})
+ipcMain.handle('office:codexImport', async (_e, slugs) => {
+  if (current) throw new Error(T('err.projectBusy'))
+  const scan = await codexCli.scanCodexCli({ codexPath: settings.codexPath, node: pool.node })
+  if (!scan.found) throw new Error(T('err.codexMissing'))
+  const want = new Set([].concat(slugs || []))
+  const picked = scan.models.filter(m => want.has(m.slug))
+  if (!picked.length) throw new Error(T('err.codexPick'))
+  const taken = new Set(settings.models.map(m => m.fruit))
+  const nextFruit = () => { const f = FRUIT_KEYS.find(k => !taken.has(k)) || FRUIT_KEYS[taken.size % FRUIT_KEYS.length]; taken.add(f); return f }
+  const keep = settings.models.filter(m => !(m.engine === 'codex' && want.has(m.model)))
+  const keys = new Set(keep.map(m => m.key))
+  const added = picked.map(m => {
+    let key = `codex-${m.slug}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-'); while (keys.has(key)) key += '-2'; keys.add(key)
+    const old = settings.models.find(x => x.engine === 'codex' && x.model === m.slug)
+    const efforts = prov.THINKING_LEVELS.filter(l => l !== 'off' && m.efforts.includes(l))
+    return parameters.validateModel({
+      key, name: m.name, provider: 'codex', engine: 'codex', model: m.slug,
+      contextWindow: m.contextWindow || 272000, vision: m.vision, fastModel: '',
+      fruit: old?.fruit || nextFruit(), efforts: efforts.length ? efforts : ['low', 'medium', 'high'],
+    })
+  })
+  const next = parameters.validateSettings({ ...settings, models: [...keep, ...added] })
+  if (!next.models.some(m => m.key === next.defaultModel)) next.defaultModel = next.models[0].key
+  writeJson(SETTINGS_FILE, next); settings = next
+  await pool.configure(settings)
+  for (const a of state.agents) send('office:agent', publicAgent(a))
+  return settings
+})
+ipcMain.handle('office:codexRemove', async () => {
+  if (current) throw new Error(T('err.projectBusy'))
+  const rest = settings.models.filter(m => m.engine !== 'codex')
+  const next = parameters.validateSettings({ ...settings, models: rest })
+  if (!rest.some(m => m.key === next.defaultModel)) next.defaultModel = rest[0]?.key || ''
+  writeJson(SETTINGS_FILE, next); settings = next
+  await pool.configure(settings)
+  for (const a of state.agents) { if (a.model && !settings.models.some(m => m.key === a.model)) a.model = null }
+  saveState()
+  for (const a of state.agents) send('office:agent', publicAgent(a))
+  return settings
 })
 ipcMain.handle('office:testModel', async (_e, req) => {
   const ref = req.apiKeyEnv || (req.route && prov.ROUTE_PATTERN.test(req.route) ? prov.deriveKeyRef(req.route) : '')

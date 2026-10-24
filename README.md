@@ -52,6 +52,7 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 - ⇩ **从其他 Agent 一键导入**：扫描本机的 **DSH、Codex、Claude Code、Hermes、opencode、cc-switch** 配置以及 **环境变量 / `.env`**（如 `DEEPSEEK_API_KEY`），勾选即导入并应用。
 - 🧠 **思考强度**：按模型能力选择 `reasoningEffort` 档位（off/minimal/low/medium/high/xhigh/max），支持全员默认和单人覆盖；⚡加急模式全员快速冲刺。
 - 🗂️ **资料室**：每个完成的项目变成书架上的一本书，可直接预览成果、目标、分工和审核记录。
+- 🤖 **Codex CLI 当员工**：直接调用本机已安装并登录的 [Codex CLI](https://github.com/openai/codex)（ChatGPT 账号登录也行，无需 API Key）。「设置 → 服务商」里一键检测，把它的模型（如 GPT-6.1-Sol）加进果盘，拖给 CEO / HR / 任意员工即可；Codex 在项目目录里读写文件、执行命令，多轮对话保持上下文，默认限制在工作区内（Windows 用 elevated 沙箱）。可与 DSH 模型混编同一支团队。
 - 💬 **项目对话窗口**：任务完成后自动弹出，左侧与 CEO 连续对话（带上下文，可追问、让他修改或补充成果），右侧是成果列表；**总结和主要成果一点就看**，对话里提到的文件也能直接点开，被 CEO 改过的文件会标「已更新」。对话记录保存在项目里，随时可回来继续。
 - 🌏 **中英双语界面**：右上角 `EN/中` 一键切换，即时生效。
 
@@ -64,6 +65,7 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 - ⇩ **One-click agent import**: scans local configs from **DSH, Codex, Claude Code, Hermes, opencode, cc-switch** plus **environment variables / `.env`** (e.g. `DEEPSEEK_API_KEY`); tick and import.
 - 🧠 **Thinking effort**: per-model `reasoningEffort` levels (off/minimal/low/medium/high/xhigh/max), with a team default and per-employee override; ⚡ rush mode puts everyone in fast gear.
 - 🗂️ **Archive room**: every finished project becomes a book on the shelf, with previewable deliverables, goal, assignments and review history.
+- 🤖 **Codex CLI as an employee**: calls the [Codex CLI](https://github.com/openai/codex) already installed and signed in on your machine (ChatGPT login works, no API key needed). Detect it under Settings → Providers, add its models (e.g. GPT-6.1-Sol) to the fruit tray and drag them onto the CEO, HR or any employee. Codex reads/writes files and runs commands in the project folder, keeps context across turns, and is confined to the workspace by default (elevated sandbox on Windows). Mix it freely with DSH models in one team.
 - 💬 **Project chat window**: pops up when a task finishes. Chat with the CEO with full context (ask follow-ups, have them revise or extend the results) while the right pane lists the deliverables — **click the summary or any main deliverable to read it**, click files mentioned in the conversation, and files the CEO edited are flagged “updated”. Transcripts are saved in the project so you can come back anytime.
 - 🌏 **Bilingual UI (Chinese + English)**: switch instantly with the `EN/中` button in the title bar.
 
@@ -218,6 +220,7 @@ Pushing a `v*` tag triggers GitHub Actions which builds all four packages (Windo
 app/
   main.cjs            Electron main: window, settings, CEO→HR→employee orchestration
   runtime.cjs         DSH CLI subprocess pool + office profile writer
+  codex.cjs           Codex CLI engine: detect, model catalogue, `codex exec --json` runtime
   providers.cjs       credentials, /models discovery, model test, DSH config reads
   agents.cjs          scanner for Codex/Claude/Hermes/opencode/cc-switch/env configs
   preload.cjs         contextIsolation IPC bridge

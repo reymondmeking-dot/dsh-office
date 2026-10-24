@@ -382,3 +382,15 @@ code.file-link { background: #e8f1ff; }
 #cp-body h1 { font-size: 21px; } #cp-body h2 { font-size: 17px; border-bottom: 1px solid #eee; padding-bottom: 4px; } #cp-body h3 { font-size: 15px; }
 .cp-img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); }
 @media (max-width: 900px) { .chat-main { flex-direction: column; } .chat-col { flex: 1.4; } }
+
+/* ---------- Codex CLI engine ---------- */
+.codex-box { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; background: rgba(10,132,255,.04); display: flex; flex-direction: column; gap: 8px; }
+.codex-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; padding: 4px 2px; font-weight: 500; color: var(--text); flex-direction: row; }
+.codex-row small { color: var(--sub); }
+.warn-t { color: #b54708; }
+
+/* ---------- Codex CLI engine ---------- */
+.codex-box { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; background: rgba(10,132,255,.04); display: flex; flex-direction: column; gap: 8px; }
+.codex-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; padding: 4px 2px; font-weight: 500; color: var(--text); flex-direction: row; }
+.codex-row small { color: var(--sub); }
+.warn-t { color: #b54708; }
