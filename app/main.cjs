@@ -125,7 +125,8 @@ const modelOf = a => (a.model && settings.models.some(m => m.key === a.model)) ?
 function effortOf(a) {
   const m = settings.models.find(x => x.key === modelOf(a))
   const offered = m?.efforts?.length ? m.efforts : null
-  const want = a.effort || settings.defaultEffort || null
+  // a Codex model carries its own ticked default depth, which outranks the office-wide default
+  const want = a.effort || (m?.engine === 'codex' && m.defaultEffort) || settings.defaultEffort || null
   if (!offered) return null
   if (want && offered.includes(want)) return want
   // nearest offered level at or below the wish, else the lowest thinking level
@@ -780,43 +781,43 @@ ipcMain.handle('office:codexScan', async () => {
   r.added = settings.models.filter(m => m.engine === 'codex').map(m => m.model)
   return r
 })
-ipcMain.handle('office:codexImport', async (_e, slugs) => {
-  if (current) throw new Error(T('err.projectBusy'))
+/** One call sets the whole Codex matrix: which models are on, each model's default depth, and fast mode. */
+ipcMain.handle('office:codexApply', async (_e, req = {}) => {
   const scan = await codexCli.scanCodexCli({ codexPath: settings.codexPath, node: pool.node })
   if (!scan.found) throw new Error(T('err.codexMissing'))
-  const want = new Set([].concat(slugs || []))
+  const want = new Set([].concat(req.enabled || []).map(String))
+  const defaults = req.defaults || {}
+  const before = settings.models.filter(m => m.engine === 'codex').map(m => m.model).sort().join('|')
   const picked = scan.models.filter(m => want.has(m.slug))
-  if (!picked.length) throw new Error(T('err.codexPick'))
+  const after = picked.map(m => m.slug).sort().join('|')
+  const setChanged = before !== after
+  if (setChanged && current) throw new Error(T('err.projectBusy'))
   const taken = new Set(settings.models.map(m => m.fruit))
   const nextFruit = () => { const f = FRUIT_KEYS.find(k => !taken.has(k)) || FRUIT_KEYS[taken.size % FRUIT_KEYS.length]; taken.add(f); return f }
-  const keep = settings.models.filter(m => !(m.engine === 'codex' && want.has(m.model)))
+  const keep = settings.models.filter(m => m.engine !== 'codex')
   const keys = new Set(keep.map(m => m.key))
   const added = picked.map(m => {
-    let key = `codex-${m.slug}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-'); while (keys.has(key)) key += '-2'; keys.add(key)
     const old = settings.models.find(x => x.engine === 'codex' && x.model === m.slug)
-    const efforts = prov.THINKING_LEVELS.filter(l => l !== 'off' && m.efforts.includes(l))
+    let key = old?.key || `codex-${m.slug}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+    while (keys.has(key)) key += '-2'; keys.add(key)
+    const want = defaults[m.slug]
     return parameters.validateModel({
       key, name: m.name, provider: 'codex', engine: 'codex', model: m.slug,
       contextWindow: m.contextWindow || 272000, vision: m.vision, fastModel: '',
-      fruit: old?.fruit || nextFruit(), efforts: efforts.length ? efforts : ['low', 'medium', 'high'],
+      fruit: old?.fruit || nextFruit(), efforts: m.efforts.length ? m.efforts : ['low', 'medium', 'high'],
+      defaultEffort: m.efforts.includes(want) ? want : (old?.defaultEffort && m.efforts.includes(old.defaultEffort) ? old.defaultEffort : m.defaultEffort),
     })
   })
-  const next = parameters.validateSettings({ ...settings, models: [...keep, ...added] })
-  if (!next.models.some(m => m.key === next.defaultModel)) next.defaultModel = next.models[0].key
+  const order = new Map(settings.models.map((m, i) => [m.key, i]))
+  added.sort((x, y) => (order.get(x.key) ?? 1e9) - (order.get(y.key) ?? 1e9))
+  const next = parameters.validateSettings({ ...settings, models: [...keep, ...added], codexFast: !!req.fast })
+  if (!next.models.some(m => m.key === next.defaultModel)) next.defaultModel = next.models[0]?.key || ''
   writeJson(SETTINGS_FILE, next); settings = next
-  await pool.configure(settings)
-  for (const a of state.agents) send('office:agent', publicAgent(a))
-  return settings
-})
-ipcMain.handle('office:codexRemove', async () => {
-  if (current) throw new Error(T('err.projectBusy'))
-  const rest = settings.models.filter(m => m.engine !== 'codex')
-  const next = parameters.validateSettings({ ...settings, models: rest })
-  if (!rest.some(m => m.key === next.defaultModel)) next.defaultModel = rest[0]?.key || ''
-  writeJson(SETTINGS_FILE, next); settings = next
-  await pool.configure(settings)
-  for (const a of state.agents) { if (a.model && !settings.models.some(m => m.key === a.model)) a.model = null }
-  saveState()
+  if (setChanged) {
+    await pool.configure(settings)
+    for (const a of state.agents) { if (a.model && !settings.models.some(m => m.key === a.model)) a.model = null }
+    saveState()
+  } else pool.settings = settings
   for (const a of state.agents) send('office:agent', publicAgent(a))
   return settings
 })

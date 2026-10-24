@@ -378,7 +378,11 @@
 
     // ---- Codex CLI engine ----
     'codex.title': 'Codex CLI 员工',
-    'codex.hint': '直接调用本机已安装并登录的 <b>Codex CLI</b>（用你的 ChatGPT 账号或 API 配置），把它的模型加进果盘，拖给任何员工，Codex 就是你的员工：它在项目目录里读写文件、执行命令，并且多轮对话保持上下文。不需要在这里填 API Key。',
+    'codex.fast': '快速模式',
+    'codex.fastTip': '开启后 Codex 使用优先（Fast）服务档位：响应更快，额度消耗更多',
+    'codex.enableTip': '滑动启用：启用后这个模型出现在果盘里',
+    'codex.defaultTip': '把「{level}」设为这个模型的默认思考深度',
+    'codex.hint': '直接调用本机已安装并登录的 <b>Codex CLI</b>（ChatGPT 账号即可，无需 API Key）。<b>表格横排是模型，竖列是思考深度</b>：滑动模型下方的开关启用它，整列变色并进入果盘；在某一深度打勾，就是这个模型的默认思考深度；左上角开关是快速模式。改动即时生效。',
     'codex.scan': '重新检测',
     'codex.scanning': '正在检测 Codex…',
     'codex.unknown': '未检测',
@@ -389,13 +393,7 @@
     'codex.loginHint': '还没登录：请在终端运行 codex login 后重新检测，否则员工调用会失败。',
     'codex.noModels': '没有读到模型列表。先在 Codex 里运行一次，或检查 ~/.codex/models_cache.json。',
     'codex.current': 'Codex 当前',
-    'codex.added': '已添加',
-    'codex.add': '＋ 添加所选 Codex 模型',
-    'codex.addedToast': '已添加 {n} 个 Codex 模型到果盘，拖到员工身上即可 🍇',
-    'codex.remove': '移除全部 Codex 模型',
-    'codex.removeConfirm': '从果盘移除所有 Codex 模型？（不会改动 Codex 本身）',
     'err.codexMissing': '没有找到 Codex CLI：请先安装（npm i -g @openai/codex）并登录（codex login）',
-    'err.codexPick': '请至少勾选一个 Codex 模型',
 
     // ---- project chat window ----
     'btn.chat.title': '和 CEO 聊项目成果',
@@ -781,7 +779,11 @@
 
     // ---- Codex CLI engine ----
     'codex.title': 'Codex CLI employees',
-    'codex.hint': 'Calls the <b>Codex CLI</b> already installed and signed in on this machine (your ChatGPT account or API config). Add its models to the fruit tray and drag one onto any employee — Codex becomes your employee: it reads/writes files and runs commands inside the project folder, and keeps context across turns. No API key needed here.',
+    'codex.fast': 'Fast mode',
+    'codex.fastTip': 'Use Codex’s priority (Fast) service tier: quicker replies, more quota used',
+    'codex.enableTip': 'Slide to enable: the model appears in the fruit tray',
+    'codex.defaultTip': 'Make “{level}” this model’s default thinking depth',
+    'codex.hint': 'Calls the <b>Codex CLI</b> already installed and signed in on this machine (a ChatGPT login is enough, no API key). <b>Models run across the top, thinking depth down the left</b>: slide a model’s switch to enable it — its column lights up and it joins the fruit tray; tick a depth to make it that model’s default; the top-left switch is fast mode. Changes apply instantly.',
     'codex.scan': 'Re-detect',
     'codex.scanning': 'Detecting Codex…',
     'codex.unknown': 'Not checked',
@@ -792,13 +794,7 @@
     'codex.loginHint': 'Not signed in yet: run codex login in a terminal and re-detect, otherwise employee calls will fail.',
     'codex.noModels': 'No model list found. Run Codex once, or check ~/.codex/models_cache.json.',
     'codex.current': 'Codex default',
-    'codex.added': 'added',
-    'codex.add': '＋ Add selected Codex models',
-    'codex.addedToast': 'Added {n} Codex model(s) to the tray — drag one onto an employee 🍇',
-    'codex.remove': 'Remove all Codex models',
-    'codex.removeConfirm': 'Remove all Codex models from the tray? (Codex itself is untouched)',
     'err.codexMissing': 'Codex CLI not found: install it (npm i -g @openai/codex) and sign in (codex login)',
-    'err.codexPick': 'Tick at least one Codex model',
 
     // ---- project chat window ----
     'btn.chat.title': 'Chat with the CEO about the results',

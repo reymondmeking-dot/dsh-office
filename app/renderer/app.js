@@ -836,18 +836,38 @@
   // ---------- Codex CLI as an employee engine ----------
   let codexInfo = null
   const codexMsg = x => { $('#codex-msg').textContent = x || '' }
+  function codexState() {
+    const cur = settings.models.filter(m => m.engine === 'codex')
+    const enabled = new Set(cur.map(m => m.model))
+    const defaults = {}
+    for (const m of codexInfo.models) {
+      const c = cur.find(x => x.model === m.slug)
+      defaults[m.slug] = c?.defaultEffort && m.efforts.includes(c.defaultEffort) ? c.defaultEffort : m.defaultEffort
+    }
+    return { enabled, defaults, fast: settings.codexFast ?? codexInfo.configFast }
+  }
+  /** Spreadsheet: top row = models (slide to enable a column), left column = thinking depth, corner = fast mode, tick = that model's default depth. */
   function renderCodex() {
     const st = $('#codex-state'), box = $('#codex-models'), r = codexInfo
-    const added = new Set(settings.models.filter(m => m.engine === 'codex').map(m => m.model))
-    $('#codex-remove').classList.toggle('hidden', !added.size)
     if (!r) { st.className = 'chip'; st.textContent = t('codex.unknown'); box.innerHTML = ''; return }
-    if (!r.found) { st.className = 'chip warn'; st.textContent = t('codex.notFound'); box.innerHTML = `<div class="hint">${t('codex.installHint')}</div>`; $('#codex-add').disabled = true; return }
+    if (!r.found) { st.className = 'chip warn'; st.textContent = t('codex.notFound'); box.innerHTML = `<div class="hint">${t('codex.installHint')}</div>`; return }
     st.className = `chip ${r.loggedIn ? 'ok' : 'warn'}`
     st.textContent = `v${r.version || '?'} · ${r.loggedIn ? t('codex.loggedIn') : t('codex.notLoggedIn')}`
-    $('#codex-add').disabled = !r.models.length
-    const list = r.models.filter(m => m.visible || added.has(m.slug) || m.slug === r.configModel)
+    const s = codexState()
+    const list = r.models.filter(m => m.visible || s.enabled.has(m.slug) || m.slug === r.configModel)
+    if (!list.length) { box.innerHTML = `<div class="hint">${t('codex.noModels')}</div>`; return }
+    const levels = ['low', 'medium', 'high', 'xhigh', 'max'].filter(l => list.some(m => m.efforts.includes(l)))
+    const sw = (attrs, on) => `<label class="sw"><input type="checkbox" ${attrs} ${on ? 'checked' : ''} /><i></i></label>`
+    const head = list.map(m => {
+      const on = s.enabled.has(m.slug)
+      return `<th class="cx-col ${on ? 'on' : ''}" scope="col"><div class="cx-name" title="${esc(m.name)}">${esc(m.name)}</div><code title="${esc(m.slug)}">${esc(m.slug)}</code><div class="cx-sw" title="${esc(t('codex.enableTip'))}">${sw(`data-en="${esc(m.slug)}"`, on)}</div>${m.contextWindow ? `<span class="chip">${fmtK(m.contextWindow)}</span>` : ''}${m.slug === r.configModel ? `<span class="chip ok">${t('codex.current')}</span>` : ''}</th>`
+    }).join('')
+    const body = levels.map(l => `<tr><th scope="row" class="cx-lv">${EFFORT_ICON[l]} ${effName(l)}</th>${list.map(m => {
+      const on = s.enabled.has(m.slug), has = m.efforts.includes(l), sel = s.defaults[m.slug] === l
+      return `<td class="cx-cell ${on ? 'on' : ''} ${has ? '' : 'na'}">${has ? `<button class="cx-tick ${sel ? 'sel' : ''}" data-slug="${esc(m.slug)}" data-l="${l}" ${on ? '' : 'disabled'} title="${esc(t('codex.defaultTip', { level: effName(l) }))}">${sel ? '✓' : ''}</button>` : '<span class="cx-na">–</span>'}</td>`
+    }).join('')}</tr>`).join('')
     box.innerHTML = (r.loggedIn ? '' : `<div class="hint warn-t">${t('codex.loginHint')}</div>`)
-      + (list.length ? list.map(m => `<label class="codex-row"><input type="checkbox" data-slug="${esc(m.slug)}" ${added.has(m.slug) || (!added.size && m.slug === r.configModel) ? 'checked' : ''} /><b>${esc(m.name)}</b><code>${esc(m.slug)}</code>${m.contextWindow ? `<span class="chip">${fmtK(m.contextWindow)}</span>` : ''}<small>${esc(effortSummary(m.efforts.filter(e => ['low', 'medium', 'high', 'xhigh', 'max'].includes(e))))}</small>${m.slug === r.configModel ? `<span class="chip ok">${t('codex.current')}</span>` : ''}${added.has(m.slug) ? `<span class="chip">${t('codex.added')}</span>` : ''}</label>`).join('') : `<div class="hint">${t('codex.noModels')}</div>`)
+      + `<div class="cx-scroll"><table class="cx-table"><thead><tr><th class="cx-corner" scope="col"><label class="cx-fast" title="${esc(t('codex.fastTip'))}">${sw('id="cx-fast"', s.fast)}<span>⚡ ${t('codex.fast')}</span></label></th>${head}</tr></thead><tbody>${body}</tbody></table></div>`
   }
   async function scanCodex() {
     codexMsg(t('codex.scanning'))
@@ -855,17 +875,25 @@
     renderCodex()
   }
   $('#codex-scan').onclick = scanCodex
-  $('#codex-add').onclick = async () => {
-    const slugs = [...document.querySelectorAll('#codex-models input[data-slug]:checked')].map(x => x.dataset.slug)
-    if (!slugs.length) return codexMsg(t('err.codexPick'))
-    const b = $('#codex-add'); b.disabled = true
-    try { settings = await api.codexImport(slugs); await afterModelsChanged(); codexInfo = await api.codexScan(); renderCodex(); toast(t('codex.addedToast', { n: slugs.length })); codexMsg('') }
-    catch (e) { codexMsg(errText(e)) } finally { b.disabled = false }
+  let codexBusy = false
+  /** Every change in the sheet applies immediately; the sheet re-renders from what was really saved. */
+  async function codexCommit(mutate) {
+    if (codexBusy || !codexInfo?.found) return
+    const s = codexState(); mutate(s)
+    codexBusy = true; codexMsg('')
+    try { settings = await api.codexApply({ enabled: [...s.enabled], defaults: s.defaults, fast: s.fast }); await afterModelsChanged() }
+    catch (e) { codexMsg(errText(e)) }
+    finally { codexBusy = false; renderCodex() }
   }
-  $('#codex-remove').onclick = async () => {
-    if (!confirm(t('codex.removeConfirm'))) return
-    try { settings = await api.codexRemove(); await afterModelsChanged(); codexInfo = await api.codexScan(); renderCodex(); codexMsg('') } catch (e) { codexMsg(errText(e)) }
-  }
+  $('#codex-models').addEventListener('change', e => {
+    const el = e.target
+    if (el.id === 'cx-fast') return codexCommit(s => { s.fast = el.checked })
+    if (el.dataset.en) return codexCommit(s => { el.checked ? s.enabled.add(el.dataset.en) : s.enabled.delete(el.dataset.en) })
+  })
+  $('#codex-models').addEventListener('click', e => {
+    const b = e.target.closest('.cx-tick'); if (!b || b.disabled) return
+    codexCommit(s => { s.defaults[b.dataset.slug] = b.dataset.l })
+  })
 
   // ---------- provider editor (DSH custom-provider card semantics) ----------
   const ROUTE_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/

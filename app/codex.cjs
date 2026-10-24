@@ -73,19 +73,32 @@ async function scanCodexCli({ codexPath, node } = {}) {
   const cfgModel = (/^\s*model\s*=\s*"([^"]+)"/m.exec(top) || [])[1] || ''
   let cache = null
   try { cache = JSON.parse(readText(path.join(codexHome(), 'models_cache.json'))) } catch {}
-  const models = (cache?.models || []).map(m => ({
-    slug: m.slug, name: m.display_name || m.slug, contextWindow: Number(m.context_window) || 0,
-    efforts: (m.supported_reasoning_levels || []).map(x => x.effort || x).filter(Boolean),
-    defaultEffort: m.default_reasoning_level || '',
-    vision: Array.isArray(m.input_modalities) ? m.input_modalities.includes('image') : true,
-    visible: m.visibility !== 'hide',
-  })).filter(m => m.slug)
-  if (cfgModel && !models.some(m => m.slug === cfgModel)) models.unshift({ slug: cfgModel, name: cfgModel, contextWindow: 0, efforts: [], defaultEffort: '', vision: true, visible: true })
+  const models = (cache?.models || []).map(m => {
+    // Office only knows low..max; Codex's extra "ultra" tier is not offered.
+    const efforts = APP_LEVELS.filter(l => (m.supported_reasoning_levels || []).some(x => (x.effort || x) === l))
+    return {
+      slug: m.slug, name: m.display_name || m.slug, contextWindow: Number(m.context_window) || 0,
+      efforts, defaultEffort: pickDefault(efforts, m.default_reasoning_level),
+      vision: Array.isArray(m.input_modalities) ? m.input_modalities.includes('image') : true,
+      visible: m.visibility !== 'hide',
+    }
+  }).filter(m => m.slug)
+  if (cfgModel && !models.some(m => m.slug === cfgModel)) models.unshift({ slug: cfgModel, name: cfgModel, contextWindow: 0, efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', vision: true, visible: true })
   return {
     found: true, path: launch.display, version: (ver.out.match(/\d+\.\d+\.\d+\S*/) || [''])[0],
     loggedIn: /logged in/i.test(login.out) && !/not logged/i.test(login.out), loginText: login.out.split('\n').pop().slice(0, 160),
-    configModel: cfgModel, models,
+    configModel: cfgModel, configFast: configFast(), models,
   }
+}
+
+const APP_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+/** Codex's own default level, clamped to what Office offers. */
+const pickDefault = (efforts, want) => efforts.includes(want) ? want : efforts.includes('medium') ? 'medium' : efforts[0] || ''
+/** Does the user's Codex config run in fast (priority) service tier? */
+function configFast() {
+  const top = (readText(path.join(codexHome(), 'config.toml')) || '').split(/^\s*\[/m)[0]
+  const tier = (/^\s*service_tier\s*=\s*"([^"]+)"/m.exec(top) || [])[1]
+  return tier === 'priority' || tier === 'fast'
 }
 
 class CodexRuntime {
@@ -106,6 +119,8 @@ class CodexRuntime {
     // Windows needs the elevated sandbox for writes to land inside the workspace; it still blocks writes outside it.
     if (WIN && !full) a.push('-c', 'windows.sandbox="elevated"')
     if (this.effort && this.effort !== 'off') a.push('-c', `model_reasoning_effort="${this.effort}"`)
+    // Fast mode = Codex's priority service tier. Office's own switch wins; otherwise follow the user's Codex config.
+    if ((settings.codexFast ?? configFast())) a.push('-c', 'service_tier="priority"')
     if (resumeId) a.push(resumeId)
     a.push('-') // prompt on stdin: no quoting problems, no length limit
     return a
@@ -164,4 +179,4 @@ class CodexRuntime {
   }
 }
 
-module.exports = { CodexRuntime, findCodex, scanCodexCli }
+module.exports = { CodexRuntime, findCodex, scanCodexCli, configFast, pickDefault }
