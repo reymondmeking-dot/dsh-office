@@ -1,5 +1,13 @@
 # DSH Office
 
+<p align="center">
+  <a href="https://github.com/reymondmeking-dot/dsh-office/releases/download/v1.2.1/dsh-office-promo.mp4">
+    <img src="docs/images/promo-preview.gif" alt="DSH Office 宣传片 / promo video" width="720" />
+  </a>
+  <br />
+  <b>▶ <a href="https://github.com/reymondmeking-dot/dsh-office/releases/download/v1.2.1/dsh-office-promo.mp4">观看 40 秒宣传片（带配音）/ Watch the 40-second promo (with sound)</a></b>
+</p>
+
 **像素办公室多 Agent 协作桌面应用** — 给 DeepSeek Harness (DSH) 套上一间会动的像素办公室：你给 CEO 派任务，CEO 定目标、HR 招人分工、员工并行干活、HR 审核返工、CEO 验收归档，全部在一间像素风办公室里实时上演。
 
 A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; the CEO sets the goal, HR hires a team and schedules the work, employees execute in parallel with HR review/rework loops, and the CEO accepts and archives everything — acted out live in a pixel-art office.
