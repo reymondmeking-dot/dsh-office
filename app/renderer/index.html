@@ -27,7 +27,8 @@
   <button id="btn-chat" class="pill-btn" data-i18n="chat.head" data-i18n-title="btn.chat.title"></button>
   <button id="btn-archive" class="icon-btn" data-i18n-title="btn.archive.title">📚</button>
   <button id="btn-lang" class="pill-btn lang-btn" data-i18n="lang.switch" title="English / 中文"></button>
-  <button id="btn-settings" class="icon-btn" data-i18n-title="btn.settings.title">⚙️</button>
+  <button id="btn-ext" class="icon-btn" data-i18n-title="btn.ext.title">🧩</button>
+<button id="btn-settings" class="icon-btn" data-i18n-title="btn.settings.title">⚙️</button>
 </header>
 
 <main id="stage">
@@ -196,6 +197,79 @@
       </div>
     </div>
     <div class="sheet-foot"><span id="set-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+  </div>
+</div>
+
+<!-- extension center: plugins / MCP / experts -->
+<div id="ext-modal" class="modal hidden">
+  <div class="sheet wide">
+    <div class="sheet-head"><div class="h1" data-i18n="ext.head"></div><button class="x" data-close="ext-modal">✕</button></div>
+    <nav class="ext-tabs" role="tablist"><button class="pill-btn on" data-ext-tab="plugins" data-i18n="ext.tabPlugins"></button><button class="pill-btn" data-ext-tab="mcp" data-i18n="ext.tabMcp"></button><button class="pill-btn" data-ext-tab="experts" data-i18n="ext.tabExperts"></button><div class="spacer"></div><span id="ext-live" class="hint"></span></nav>
+    <div class="settings-body">
+      <div class="ext-pane" data-pane="plugins">
+        <div class="group">
+          <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.plugins"></div><div class="spacer"></div><button id="ext-plugin-folder" class="pill-btn" data-i18n="ext.openPluginDir"></button><button id="ext-plugin-install" class="pill-btn primary" data-i18n="ext.installPlugin"></button></div>
+          <div class="hint" data-i18n-html="ext.pluginsHint"></div>
+          <div id="ext-plugins"></div>
+        </div>
+      </div>
+      <div class="ext-pane hidden" data-pane="mcp">
+        <div class="group">
+          <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.mcp"></div><div class="spacer"></div><button id="ext-mcp-paste" class="pill-btn" data-i18n="ext.mcpPaste"></button><button id="ext-mcp-add" class="pill-btn primary" data-i18n="ext.mcpAdd"></button></div>
+          <div class="hint" data-i18n-html="ext.mcpHint"></div>
+          <div id="ext-mcp"></div>
+        </div>
+      </div>
+      <div class="ext-pane hidden" data-pane="experts">
+        <div class="group">
+          <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.experts"></div><div class="spacer"></div><button id="ext-expert-add" class="pill-btn primary" data-i18n="ext.expertAdd"></button></div>
+          <div class="hint" data-i18n-html="ext.expertsHint"></div>
+          <div id="ext-experts"></div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-foot"><span id="ext-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="ext-modal" data-i18n="ext.close"></button></div>
+  </div>
+</div>
+
+<!-- MCP server editor -->
+<div id="mcp-modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheet-head"><div class="h1" id="mcp-head" data-i18n="mcp.headAdd"></div><button class="x" data-close="mcp-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="group grid2">
+        <label><span data-i18n="mcp.name"></span><input id="mcp-name" spellcheck="false" placeholder="github" /></label>
+        <label><span data-i18n="mcp.transport"></span><select id="mcp-transport"><option value="stdio" data-i18n="mcp.stdio"></option><option value="streamable-http" data-i18n="mcp.http"></option></select></label>
+        <label class="span2"><span data-i18n="mcp.desc"></span><input id="mcp-desc" data-i18n-ph="mcp.descPh" /></label>
+        <label class="span2 mcp-stdio"><span data-i18n="mcp.command"></span><input id="mcp-command" spellcheck="false" placeholder="npx -y @modelcontextprotocol/server-github" /><small class="hint" data-i18n="mcp.commandHint"></small></label>
+        <label class="span2 mcp-stdio"><span data-i18n="mcp.cwd"></span><input id="mcp-cwd" spellcheck="false" data-i18n-ph="mcp.cwdPh" /></label>
+        <label class="span2 mcp-http hidden"><span>URL</span><input id="mcp-url" spellcheck="false" placeholder="https://example.com/mcp" /></label>
+        <label class="span2"><span id="mcp-kv-label" data-i18n="mcp.env"></span><textarea id="mcp-kv" rows="3" spellcheck="false" placeholder="GITHUB_TOKEN=${GITHUB_TOKEN}"></textarea><small class="hint" data-i18n-html="mcp.kvHint"></small></label>
+        <label><span data-i18n="mcp.timeout"></span><input id="mcp-timeout" type="number" min="1" max="600" /></label>
+        <label class="check" style="align-self:end"><input id="mcp-enabled" type="checkbox" checked /><span data-i18n="mcp.enabled"></span></label>
+      </div>
+      <div class="group"><div class="row"><button id="mcp-test" class="pill-btn" data-i18n="mcp.test"></button><span id="mcp-test-res" class="hint"></span></div><div id="mcp-tools" class="mcp-tools"></div></div>
+    </div>
+    <div class="sheet-foot"><span id="mcp-msg" class="hint"></span><div class="spacer"></div><button id="mcp-del" class="pill-btn danger" data-i18n="mcp.del"></button><button class="pill-btn" data-close="mcp-modal" data-i18n="set.cancel"></button><button id="mcp-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+  </div>
+</div>
+
+<!-- expert editor -->
+<div id="expert-modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheet-head"><div class="h1" id="ex-head" data-i18n="ex.headAdd"></div><button class="x" data-close="expert-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="group grid2">
+        <label><span data-i18n="ex.id"></span><input id="ex-id" spellcheck="false" placeholder="seo-expert" /></label>
+        <label><span data-i18n="ex.icon"></span><input id="ex-icon" maxlength="4" placeholder="🧠" /></label>
+        <label><span data-i18n="ex.title"></span><input id="ex-title" data-i18n-ph="ex.titlePh" /></label>
+        <label><span data-i18n="ex.name"></span><input id="ex-name" data-i18n-ph="ex.namePh" /></label>
+        <label class="span2"><span data-i18n="ex.skills"></span><input id="ex-skills" data-i18n-ph="ex.skillsPh" /></label>
+        <label class="span2"><span data-i18n="ex.prompt"></span><textarea id="ex-prompt" rows="9" data-i18n-ph="ex.promptPh"></textarea></label>
+        <div class="span2"><span class="hint" data-i18n="ex.mcp"></span><div id="ex-mcp" class="ex-mcp"></div></div>
+      </div>
+    </div>
+    <div class="sheet-foot"><span id="ex-msg" class="hint"></span><div class="spacer"></div><button id="ex-del" class="pill-btn danger" data-i18n="ex.del"></button><button class="pill-btn" data-close="expert-modal" data-i18n="set.cancel"></button><button id="ex-save" class="pill-btn primary" data-i18n="set.save"></button></div>
   </div>
 </div>
 

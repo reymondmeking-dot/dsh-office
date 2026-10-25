@@ -1,0 +1,13 @@
+{
+  "id": "mcp-starter",
+  "name": { "zh": "常用 MCP 工具包", "en": "Starter MCP pack" },
+  "description": { "zh": "常用的官方 MCP 服务器：fetch（抓取网页转 Markdown，需要 uv/uvx）、memory（知识图谱记忆）、sequential-thinking（分步思考）。需要本机有 Node.js（npx）和 uv。启用后全体员工可用，可在下方逐个开关。", "en": "Popular official MCP servers: fetch (web page to Markdown, needs uv/uvx), memory (knowledge-graph memory), sequential-thinking (step-by-step reasoning). Needs Node.js (npx) and uv on this machine. Once enabled every employee can use them; toggle each one below." },
+  "version": "1.0.0",
+  "author": "DSH Office",
+  "enabledByDefault": false,
+  "mcpServers": [
+    { "name": "fetch", "transport": "stdio", "command": "uvx", "args": ["mcp-server-fetch"], "description": "Fetch a URL and return it as Markdown", "timeoutMs": 90000 },
+    { "name": "memory", "transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"], "description": "Knowledge-graph memory shared by the team", "timeoutMs": 60000 },
+    { "name": "thinking", "transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"], "description": "Structured step-by-step thinking", "timeoutMs": 60000 }
+  ]
+}

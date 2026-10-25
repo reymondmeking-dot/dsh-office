@@ -35,6 +35,8 @@ const SETTINGS_FILE = path.join(USER, 'settings.json')
 const STATE_FILE = path.join(USER, 'office-state.json')
 const LOG_FILE = path.join(USER, 'office.log')
 const HARNESS_DIR = path.join(USER, 'harness')
+const PLUGIN_DIR = path.join(USER, 'plugins')
+const extensions = require('./extensions.cjs')
 
 /** Where a DSH (deepseek-harness) checkout normally lives on each platform. */
 function defaultDshRoot() {
@@ -62,6 +64,11 @@ const DEFAULT_SETTINGS = {
   // No built-in API configuration: the user adds providers/models in Settings.
   providers: {},
   models: [],
+  // Extensions (Settings → Extensions): user MCP servers, custom experts, plugin switches.
+  mcpServers: [],
+  experts: [],
+  plugins: {},
+  pluginMcp: {},
 }
 const NO_MODEL_MSG = () => T('err.noModel')
 /** Default per-request output cap used to sanity-check a model entry. */
@@ -89,6 +96,8 @@ let settings = parameters.migrateSettings({ ...DEFAULT_SETTINGS, ...loadedSettin
   compaction: loadedSettings.compaction,
 })
 if (JSON.stringify(settings) !== JSON.stringify(loadedSettings)) writeJson(SETTINGS_FILE, settings)
+// runtime.cjs finds user plugins through this (it follows userData; not a setting).
+process.env.DSH_OFFICE_PLUGIN_DIR = PLUGIN_DIR
 for (const m of settings.models) if (!Array.isArray(m.efforts)) m.efforts = ['off', 'low', 'medium', 'high']
 const projectsDir = () => path.join(settings.workspace, 'projects')
 
@@ -169,6 +178,8 @@ let pool
 function initPool() {
   pool = new RuntimePool(settings, log)
 }
+/** Enabled MCP servers / experts / skills right now (what the pool was configured with). */
+const liveExt = () => pool?.ext || extensions.resolve(settings, extensions.loadPlugins(PLUGIN_DIR))
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const pace = ms => sleep(state.rush ? ms / 3 : ms)
@@ -184,6 +195,8 @@ function toolLabel(name, args) {
     pwsh: T('tool.shell'), bash: T('tool.shell'), web_search: T('tool.webSearch'), web_fetch: T('tool.webFetch'), todo_write: T('tool.todo'),
     skill: T('tool.skill'), subagent: T('tool.subagent'), read_image: T('tool.image'),
   }
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name || '')
+  if (mcp) return T('tool.mcp', { server: mcp[1], name: mcp[2] })
   return map[name] || T('tool.other', { name })
 }
 
@@ -191,7 +204,10 @@ async function runAgent(a, sessionTag, prompt, rush) {
   const rt = pool.get(modelOf(a), rush, effortOf(a))
   const sessionId = `${a.id}-${sessionTag}-${crypto.randomBytes(4).toString('hex')}`
   const text = await rt.run(sessionId, prompt, ev => {
-    if (ev.type === 'tool/call') setAgent(a.id, { activity: toolLabel(ev.data.name, ev.data.arguments) })
+    if (ev.type === 'tool/call') {
+      if (/^mcp__/.test(ev.data.name || '')) log(`mcp ${a.name} ${ev.data.name}`)
+      setAgent(a.id, { activity: toolLabel(ev.data.name, ev.data.arguments) })
+    }
     else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('typing', { id: a.id })
   })
   return text
@@ -430,6 +446,12 @@ ${goalJson}`, rush()))
   // 2. HR hires + divides work + schedules
   setAgent('hr', { status: 'busy', activity: T('act.hrPlanning') })
   emit('hr-hiring', {})
+  const live = liveExt()
+  const lang = EN() ? 'en' : 'zh'
+  const pk = v => extensions.pick(v, lang)
+  const expertNote = () => live.experts.length ? (EN()
+    ? `## Expert library (prefer these when a role fits; set "expert" to the id, and you may still pick the name)\n${live.experts.map(e => `- ${e.id}: ${pk(e.title)}${pk(e.skills) ? ` (${pk(e.skills)})` : ''}${e.mcp.length ? ` [tools: ${e.mcp.join(', ')}]` : ''}`).join('\n')}\n\n`
+    : `## 专家库（岗位合适时优先招专家：把 "expert" 设为专家 id，名字仍可自己起）\n${live.experts.map(e => `- ${e.id}：${pk(e.title)}${pk(e.skills) ? `（${pk(e.skills)}）` : ''}${e.mcp.length ? ` [工具：${e.mcp.join('、')}]` : ''}`).join('\n')}\n\n`) : ''
   const hrPrompt = EN() ? `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
 
 ## This task
@@ -438,8 +460,8 @@ ${taskText()}
 ## The CEO's goal
 ${goalText}
 
-Hire, assign and schedule the work. Output format (strict JSON):
-{"team":[{"name":"English first name","title":"job title","skills":"core skills","task":"detailed sub-task: what to do, what to deliver, quality bar","deliverable":"main deliverable file name, e.g. 02-market-research.md","after":["names of colleagues who must finish first, or []"]}],"note":"one sentence on the hiring and scheduling plan","kickoff":"one opening line for the kickoff meeting"}` : `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
+${expertNote()}Hire, assign and schedule the work. Output format (strict JSON):
+{"team":[{"name":"English first name","title":"job title","skills":"core skills","task":"detailed sub-task: what to do, what to deliver, quality bar","deliverable":"main deliverable file name, e.g. 02-market-research.md","expert":"expert id from the library, or empty","after":["names of colleagues who must finish first, or []"]}],"note":"one sentence on the hiring and scheduling plan","kickoff":"one opening line for the kickoff meeting"}` : `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
 
 ## 本次任务
 ${taskText()}
@@ -447,8 +469,8 @@ ${taskText()}
 ## CEO 定的目标
 ${goalText}
 
-请招人并分工排期。输出格式（严格 JSON）：
-{"team":[{"name":"员工中文名","title":"职位","skills":"核心技能","task":"详细子任务：做什么、交付什么、质量标准","deliverable":"主交付文件名，如 02-市场调研.md","after":["必须等哪些同事完成（填名字），没有则 []"]}],"note":"一句话说明招聘与排期思路","kickoff":"一句开工会开场白"}`
+${expertNote()}请招人并分工排期。输出格式（严格 JSON）：
+{"team":[{"name":"员工中文名","title":"职位","skills":"核心技能","task":"详细子任务：做什么、交付什么、质量标准","deliverable":"主交付文件名，如 02-市场调研.md","expert":"专家库里的专家 id，没有则留空","after":["必须等哪些同事完成（填名字），没有则 []"]}],"note":"一句话说明招聘与排期思路","kickoff":"一句开工会开场白"}`
   let team, hrPlan = {}
   const hrStart = Date.now()
   try {
@@ -467,13 +489,16 @@ ${goalText}
     ]
   }
   await sleep(Math.max(0, (state.rush ? 800 : 2500) - (Date.now() - hrStart)))
-  const hires = team.map((m, i) => ({
-    id: `emp-${crypto.randomBytes(3).toString('hex')}`, role: 'employee', name: String(m.name || T('emp.fallback', { n: i + 1 })).slice(0, 12),
-    title: String(m.title || T('emp.titleFallback')).slice(0, 24), skills: String(m.skills || ''), duty: String(m.task || m.duty || ''), task: String(m.task || m.duty || ''),
+  const hires = team.map((m, i) => {
+    const ex = m.expert ? live.experts.find(e => e.id === String(m.expert).trim()) : null
+    return {
+    id: `emp-${crypto.randomBytes(3).toString('hex')}`, role: 'employee', name: String(m.name || (ex && pk(ex.name)) || T('emp.fallback', { n: i + 1 })).slice(0, 12),
+    title: String(m.title || (ex && pk(ex.title)) || T('emp.titleFallback')).slice(0, 24), skills: String(m.skills || (ex && pk(ex.skills)) || ''), duty: String(m.task || m.duty || ''), task: String(m.task || m.duty || ''),
+    expert: ex ? { id: ex.id, title: pk(ex.title), icon: ex.icon || '', source: ex.source } : null,
     deliverable: String(m.deliverable || `${String(i + 1).padStart(2, '0')}-${slug(m.title || 'result')}.md`).replace(/[\\/]/g, '-'),
     model: null, status: 'idle', activity: T('act.newcomer'), look: { hair: Math.floor(Math.random() * 6), shirt: Math.floor(Math.random() * 10), skin: Math.floor(Math.random() * 3) },
     project: p.id, _after: [].concat(m.after || []).map(String),
-  }))
+  } })
   // resolve "after" names → ids; drop unknown names, self-refs and cycles
   const byName = new Map(hires.map(h => [h.name, h.id]))
   const origName = new Map(team.map((m, i) => [String(m.name || ''), hires[i].id]))
@@ -483,8 +508,8 @@ ${goalText}
   for (const h of hires) delete h._after
   state.agents.push(...hires); saveState()
   const nameOf = id => hires.find(h => h.id === id)?.name || id
-  p.team = hires.map(({ id, name, title, skills, duty, deliverable }) => ({ id, name, title, skills, duty, deliverable }))
-  p.assignments = hires.map(h => ({ id: h.id, name: h.name, title: h.title, task: h.task, deliverable: h.deliverable, after: h.deps.map(nameOf) }))
+  p.team = hires.map(({ id, name, title, skills, duty, deliverable, expert }) => ({ id, name, title, skills, duty, deliverable, expert: expert?.id || undefined }))
+  p.assignments = hires.map(h => ({ id: h.id, name: h.name, title: h.title, task: h.task, deliverable: h.deliverable, after: h.deps.map(nameOf), expert: h.expert?.id || undefined }))
   phase(p, 'hiring', `HR 招到 ${hires.length} 人`)
   setAgent('hr', { status: 'busy', activity: T('act.hrHired', { n: hires.length }) })
   emit('hired', { agents: hires.map(publicAgent) })
@@ -557,12 +582,25 @@ ${rec.report}
 请检查项目目录中的成果（只读，不要改文件），判断是否通过。${round >= MAX_REWORK ? '这已经是最后一次机会，除非完全不可用，否则请判定通过并把遗留问题写进意见。' : ''}
 输出严格 JSON：{"pass":true,"comment":"一句话审核意见（不通过时写清要改什么）"}`
 
+  // Expert hires get their expert brief; everyone learns which MCP tools are mounted.
+  const expertBlock = h => {
+    const ex = h.expert && live.experts.find(e => e.id === h.expert.id)
+    let out = ''
+    if (ex) out += EN() ? `\n\n## Your expert brief (${pk(ex.title)})\n${pk(ex.prompt)}` : `\n\n## 你的专家设定（${pk(ex.title)}）\n${pk(ex.prompt)}`
+    if (live.mcpServers.length) {
+      const mine = ex?.mcp?.length ? live.mcpServers.filter(s => ex.mcp.includes(s.name)) : []
+      const list = live.mcpServers.map(s => `- ${s.name}${s.description ? `: ${s.description}` : ''} (mcp__${s.name}__*)`).join('\n')
+      out += EN() ? `\n\n## MCP tools available\n${list}${mine.length ? `\nYour expert role relies on: ${mine.map(s => s.name).join(', ')}. Use them where they help.` : ''}`
+        : `\n\n## 可用的 MCP 工具\n${list}${mine.length ? `\n你的专家岗位重点使用：${mine.map(s => s.name).join('、')}，需要时直接调用。` : ''}`
+    }
+    return out
+  }
   const work = async h => {
     let feedback = ''
     for (let round = 0; ; round++) {
       setAgent(h.id, { status: 'busy', activity: round ? T('act.rework', { n: round }) : T('act.startWork') })
       emit('work-start', { id: h.id })
-      const prompt = EN() ? `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}
+      const prompt = EN() ? `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}${expertBlock(h)}
 
 ## Project
 ${taskText()}
@@ -576,7 +614,7 @@ ${p.assignments.map(x => `- ${x.name} (${x.title}): ${x.task} -> ${x.deliverable
 ## Your sub-task (from HR)
 ${h.task}${handoff(h)}${feedback ? `\n\n## HR sent it back (rework accordingly; edit the existing files)\n${feedback}` : ''}
 
-Start working now and write your output to ${p.rel}/${h.deliverable}.` : `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}
+Start working now and write your output to ${p.rel}/${h.deliverable}.` : `${harness('employee', { ...vars, name: h.name, title: h.title, skills: h.skills, deliverable: h.deliverable })}${expertBlock(h)}
 
 ## 项目
 ${taskText()}
@@ -1094,6 +1132,48 @@ ipcMain.handle('office:saveSettings', async (_e, next) => {
   return settings
 })
 ipcMain.handle('office:openLog', () => shell.openPath(LOG_FILE))
+
+// ---------- extensions: plugins / MCP / experts ----------
+const extInfo = () => {
+  const plugins = extensions.loadPlugins(PLUGIN_DIR)
+  const live = extensions.resolve(settings, plugins)
+  return {
+    pluginDir: PLUGIN_DIR, plugins: plugins.map(p => extensions.publicPlugin(p, settings)),
+    mcpServers: settings.mcpServers || [], experts: settings.experts || [], pluginMcp: settings.pluginMcp || {},
+    live: { mcp: live.mcpServers.map(s => ({ name: s.name, source: s.source })), experts: live.experts.map(e => ({ id: e.id, source: e.source })), skills: live.skills.map(s => ({ name: s.name, source: s.source })), skipped: live.skipped },
+  }
+}
+async function saveExt(patch) {
+  if (current) throw new Error(T('err.settingsBusy'))
+  const validated = parameters.validateSettings({ ...settings, ...patch })
+  writeJson(SETTINGS_FILE, validated)
+  settings = validated
+  await pool.configure(settings)
+  return extInfo()
+}
+ipcMain.handle('office:extInfo', () => extInfo())
+ipcMain.handle('office:saveExt', (_e, patch = {}) => {
+  const allowed = {}
+  for (const k of ['mcpServers', 'experts', 'plugins', 'pluginMcp']) if (patch[k] !== undefined) allowed[k] = patch[k]
+  return saveExt(allowed)
+})
+ipcMain.handle('office:testMcp', (_e, server) => extensions.testMcp(server, { cwd: settings.workspace }))
+ipcMain.handle('office:installPlugin', async (_e, dir) => {
+  if (!dir) {
+    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: T('ext.pickPlugin') })
+    if (r.canceled) return null
+    dir = r.filePaths[0]
+  }
+  const p = extensions.installPlugin(dir, PLUGIN_DIR)
+  // a freshly installed plugin starts enabled
+  return saveExt({ plugins: { ...(settings.plugins || {}), [p.id]: true } })
+})
+ipcMain.handle('office:removePlugin', (_e, id) => {
+  extensions.removePlugin(id, PLUGIN_DIR)
+  const plugins = { ...(settings.plugins || {}) }; delete plugins[id]
+  return saveExt({ plugins })
+})
+ipcMain.handle('office:pluginDir', () => { fs.mkdirSync(PLUGIN_DIR, { recursive: true }); return shell.openPath(PLUGIN_DIR) })
 ipcMain.on('win:min', () => win?.minimize())
 ipcMain.on('win:max', () => win?.isMaximized() ? win.unmaximize() : win?.maximize())
 ipcMain.on('win:close', () => win?.close())

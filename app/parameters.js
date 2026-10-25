@@ -123,7 +123,95 @@
       if (c.maxTokens >= summary.contextWindow || (summary.outputLimit && c.maxTokens > summary.outputLimit)) throw new Error(M(`${summary.name || summary.model}的摘要上限超过模型能力，请调小摘要输出上限`, `${summary.name || summary.model}: the summary cap exceeds the model limit; lower the summary output cap`))
       if (b.thresholdTokens + c.maxTokens >= summary.contextWindow) throw new Error(M(`${label}的实际压缩触发量与摘要输出上限超出摘要模型窗口，请调小摘要上限或触发比例，或增加压缩预留`, `${label}: the compaction trigger plus the summary cap exceed the summary model window; lower the summary cap or trigger ratio, or raise the headroom`))
     }
+    if (raw.mcpServers !== undefined) {
+      if (!Array.isArray(raw.mcpServers)) throw new Error(M('MCP 服务器列表必须是数组', 'The MCP server list must be an array'))
+      result.mcpServers = raw.mcpServers.map(normalizeMcpServer)
+      const seen = new Set()
+      for (const s of result.mcpServers) {
+        if (seen.has(s.name.toLowerCase())) throw new Error(M(`MCP 服务器名称重复：${s.name}`, `Duplicate MCP server name: ${s.name}`))
+        seen.add(s.name.toLowerCase())
+      }
+    }
+    if (raw.experts !== undefined) {
+      if (!Array.isArray(raw.experts)) throw new Error(M('专家列表必须是数组', 'The expert list must be an array'))
+      result.experts = raw.experts.map(normalizeExpert)
+      const seen = new Set()
+      for (const e of result.experts) {
+        if (seen.has(e.id)) throw new Error(M(`专家 ID 重复：${e.id}`, `Duplicate expert id: ${e.id}`))
+        seen.add(e.id)
+      }
+    }
+    for (const key of ['plugins', 'pluginMcp']) {
+      if (raw[key] === undefined) continue
+      const o = raw[key]
+      if (!o || typeof o !== 'object' || Array.isArray(o) || Object.values(o).some(v => typeof v !== 'boolean')) throw new Error(M('插件开关必须是 { id: true/false }', 'Plugin switches must be { id: true/false }'))
+      result[key] = { ...o }
+    }
     return result
+  }
+
+  // ---------- MCP servers ----------
+  const strMap = (o, label) => {
+    if (o === undefined || o === null || o === '') return {}
+    if (typeof o !== 'object' || Array.isArray(o)) throw new Error(M(`${label}必须是键值对象`, `${label} must be a key/value object`))
+    const out = {}
+    for (const [k, v] of Object.entries(o)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(k)) throw new Error(M(`${label}的键名不合法：${k}`, `${label}: invalid key ${k}`))
+      if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') throw new Error(M(`${label}的值必须是文本：${k}`, `${label}: value of ${k} must be text`))
+      out[k] = String(v)
+    }
+    return out
+  }
+  /** One MCP server: { name, transport: stdio|streamable-http, command/args/env/cwd | url/headers, timeoutMs, enabled, description }. */
+  function normalizeMcpServer(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(M('MCP 服务器必须是对象', 'An MCP server must be an object'))
+    const name = String(raw.name || raw.serverName || '').trim()
+    // Same rule as dsh-mcp-client serverName; also a valid Codex TOML key.
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) throw new Error(M(`MCP 服务器名称只能用字母、数字、- 和 _（1-32 位）：${name || '（空）'}`, `MCP server names use letters, digits, - and _ (1-32 chars): ${name || '(empty)'}`))
+    let transport = String(raw.transport || (raw.url ? 'streamable-http' : 'stdio'))
+    if (transport === 'http') transport = 'streamable-http'
+    if (transport !== 'stdio' && transport !== 'streamable-http') throw new Error(M(`${name}：传输方式只能是 stdio 或 streamable-http`, `${name}: transport must be stdio or streamable-http`))
+    const timeoutMs = raw.timeoutMs === undefined || raw.timeoutMs === '' ? 60000 : Number(raw.timeoutMs)
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000) throw new Error(M(`${name}：超时必须在 1000-600000 毫秒之间`, `${name}: timeout must be 1000-600000 ms`))
+    const s = { name, transport, enabled: raw.enabled !== false, description: String(raw.description || '').slice(0, 300), timeoutMs }
+    if (transport === 'stdio') {
+      s.command = String(raw.command || '').trim()
+      if (!s.command) throw new Error(M(`${name}：stdio 方式需要填写启动命令`, `${name}: stdio needs a command`))
+      const args = raw.args === undefined ? [] : raw.args
+      if (!Array.isArray(args) || args.some(a => typeof a !== 'string' && typeof a !== 'number')) throw new Error(M(`${name}：参数必须是文本数组`, `${name}: args must be a list of strings`))
+      s.args = args.map(String)
+      s.env = strMap(raw.env, M(`${name} 的环境变量`, `${name} env`))
+      s.cwd = String(raw.cwd || '').trim()
+    } else {
+      s.url = String(raw.url || '').trim()
+      if (!/^https?:\/\/\S+$/.test(s.url.replace(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/g, 'x'))) throw new Error(M(`${name}：需要 http(s) 地址`, `${name}: needs an http(s) URL`))
+      s.headers = strMap(raw.headers, M(`${name} 的请求头`, `${name} headers`))
+    }
+    return s
+  }
+
+  // ---------- experts ----------
+  const text = (v, max) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const o = {}
+      for (const l of ['zh', 'en']) if (v[l] !== undefined) o[l] = String(v[l]).slice(0, max)
+      return o
+    }
+    return String(v ?? '').slice(0, max)
+  }
+  const filled = v => v && typeof v === 'object' ? Object.values(v).some(x => String(x).trim()) : String(v || '').trim() !== ''
+  /** One expert template: { id, name, title, skills, prompt, mcp[], icon } — name/title/skills/prompt may be { zh, en }. */
+  function normalizeExpert(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(M('专家必须是对象', 'An expert must be an object'))
+    const id = String(raw.id || '').trim()
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id)) throw new Error(M(`专家 ID 只能用小写字母、数字和 -：${id || '（空）'}`, `Expert ids use lowercase letters, digits and -: ${id || '(empty)'}`))
+    const e = { id, name: text(raw.name, 40), title: text(raw.title, 40), skills: text(raw.skills, 300), prompt: text(raw.prompt, 8000), icon: String(raw.icon || '').slice(0, 4) }
+    if (!filled(e.title)) throw new Error(M(`专家 ${id} 需要职位名称`, `Expert ${id} needs a title`))
+    if (!filled(e.prompt)) throw new Error(M(`专家 ${id} 需要专家设定（提示词）`, `Expert ${id} needs an expert prompt`))
+    const mcp = raw.mcp === undefined ? [] : raw.mcp
+    if (!Array.isArray(mcp) || mcp.some(x => !/^[A-Za-z0-9_-]{1,32}$/.test(String(x)))) throw new Error(M(`专家 ${id} 的 MCP 列表不合法`, `Expert ${id}: invalid MCP list`))
+    e.mcp = mcp.map(String)
+    return e
   }
   // Missing/zero legacy output caps become explicit, predictable request budgets.
   function migrateSettings(raw) {
@@ -137,5 +225,5 @@
     }
     return validateSettings(next)
   }
-  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings })
+  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert })
 })

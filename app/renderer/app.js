@@ -30,6 +30,7 @@
     if (!$('#settings-modal').classList.contains('hidden')) { renderProviders(); renderContextBudget(); renderCodex(); $('#set-harness').options[0].textContent = `CEO ${agents.get('ceo')?.name || ''}`; $('#set-harness').options[1].textContent = `HR ${agents.get('hr')?.name || ''}` }
     if (!$('#prov-modal').classList.contains('hidden') && pv) { openProvider(pv.existing ? pv.route : null); if (!pv.existing) { $('#pv-route').value = pv.route; $('#pv-url').value = '' } }
     if (!$('#imp-modal').classList.contains('hidden')) renderImport()
+    if (!$('#ext-modal').classList.contains('hidden')) renderExt()
     if (!$('#chat-modal').classList.contains('hidden') && chat) { fillChatProjects(chatable(), chat.id); renderChat() }
     if (popAgent) renderPop()
   }
@@ -328,7 +329,7 @@
     const a = agents.get(popAgent); if (!a) return closePop()
     $('#ap-portrait').src = S.portraitURL(a)
     $('#ap-name').textContent = a.name
-    $('#ap-title').textContent = a.role === 'ceo' ? t('pop.titleCeo') : a.role === 'hr' ? t('pop.titleHr') : `${a.title} · ${a.skills || ''}`
+    $('#ap-title').textContent = a.role === 'ceo' ? t('pop.titleCeo') : a.role === 'hr' ? t('pop.titleHr') : `${a.expert ? `${a.expert.icon || '🧠'} ${t('pop.expert')} · ` : ''}${a.title} · ${a.skills || ''}`
     const st = $('#ap-status'); st.className = `chip ${a.status}`
     st.textContent = a.status === 'busy' ? t('pop.busy') : a.status === 'reporting' ? t('pop.reporting') : t('pop.idle')
     const grid = $('#ap-models'); grid.innerHTML = ''
@@ -556,7 +557,7 @@
   function showOverview(p) {
     const pv = $('#bv-preview')
     const members = (p.assignments?.length ? p.assignments : p.team || [])
-    const teamCards = members.map(x => `<div class="team-card"><b>${esc(x.name)}</b> · ${esc(x.title)}${x.after?.length ? t('archive.after', { names: esc(andJoin(x.after)) }) : ''}<br>${esc(x.task || x.duty || '')}<br><span style="color:#6e6e73">→ ${esc(x.deliverable || '')}</span></div>`).join('')
+    const teamCards = members.map(x => `<div class="team-card"><b>${esc(x.name)}</b> · ${esc(x.title)}${x.expert ? ` <span class="chip">🧠 ${esc(x.expert)}</span>` : ''}${x.after?.length ? t('archive.after', { names: esc(andJoin(x.after)) }) : ''}<br>${esc(x.task || x.duty || '')}<br><span style="color:#6e6e73">→ ${esc(x.deliverable || '')}</span></div>`).join('')
     const reports = (p.reports || []).map(r => `<blockquote><b>${esc(r.name)}</b>（${esc(r.title)}）${r.round ? t('archive.round', { n: r.round + 1 }) : ''} ${repTag(r)}<br>${esc(r.report)}${r.review ? t('archive.reviewHr', { cls: r.review.pass ? 'ok' : 'bad', verdict: r.review.pass ? t('archive.pass') : t('archive.return'), comment: esc(r.review.comment) }) : ''}</blockquote>`).join('')
     pv.innerHTML = `<h1>${esc(p.title)}</h1>
       <p style="color:#6e6e73">${esc(p.brief || t('archive.briefEmpty'))}</p>
@@ -1198,6 +1199,196 @@
     $('#set-harness-text').value = harnessDirty[harnessName] ?? await api.harness(harnessName)
   }
   $('#set-openharness').onclick = () => api.harnessDir()
+
+  // ---------- extension center: plugins / MCP / experts ----------
+  let ext = null, extTab = 'plugins'
+  const pk = v => v && typeof v === 'object' && !Array.isArray(v) ? String(v[lang] ?? v.zh ?? v.en ?? '') : String(v ?? '')
+  const extMsg = (x, bad) => { const el = $('#ext-msg'); el.textContent = x || ''; el.classList.toggle('parameter-error', !!bad) }
+  const srcName = s => s === 'user' ? t('ext.srcUser') : pk(ext?.plugins.find(p => p.id === s)?.name) || s
+  async function openExt(tab) {
+    $('#ext-modal').classList.remove('hidden'); extMsg('')
+    if (tab) extTab = tab
+    try { ext = await api.extInfo() } catch (e) { extMsg(errText(e), true); return }
+    renderExt()
+  }
+  async function saveExt(patch, okText) {
+    try { ext = await api.saveExt(patch); settings = { ...settings, ...patch }; renderExt(); extMsg(okText || t('ext.saved')); return true }
+    catch (e) { extMsg(errText(e), true); return false }
+  }
+  function renderExt() {
+    if (!ext) return
+    for (const b of document.querySelectorAll('[data-ext-tab]')) b.classList.toggle('on', b.dataset.extTab === extTab)
+    for (const p of document.querySelectorAll('.ext-pane')) p.classList.toggle('hidden', p.dataset.pane !== extTab)
+    $('#ext-live').textContent = t('ext.live', { p: ext.plugins.filter(p => p.enabled).length, m: ext.live.mcp.length, e: ext.live.experts.length, s: ext.live.skills.length })
+    renderPlugins(); renderMcpList(); renderExperts()
+  }
+  const sw = (on, attrs = '') => `<label class="sw"><input type="checkbox" ${on ? 'checked' : ''} ${attrs}/><span></span></label>`
+  function renderPlugins() {
+    const box = $('#ext-plugins')
+    if (!ext.plugins.length) { box.innerHTML = `<div class="empty-models hint">${t('ext.noPlugins')}</div>`; return }
+    box.innerHTML = ext.plugins.map(p => {
+      const parts = []
+      if (p.experts.length) parts.push(t('ext.cExperts', { n: p.experts.length }))
+      if (p.mcpServers.length) parts.push(t('ext.cMcp', { n: p.mcpServers.length }))
+      if (p.skills.length) parts.push(t('ext.cSkills', { n: p.skills.length }))
+      const mcpRows = p.mcpServers.map(s => {
+        const k = `${p.id}/${s.name}`, o = ext.pluginMcp[k], on = typeof o === 'boolean' ? o : s.enabled
+        const shadow = ext.live.skipped.some(x => x.name === s.name && x.source === p.id)
+        return `<div class="ext-sub"><code>${esc(s.name)}</code><span class="hint">${esc(s.transport === 'stdio' ? [s.command, ...s.args].join(' ') : s.url)}</span>${shadow ? `<span class="chip warn">${t('ext.shadowed')}</span>` : ''}<div class="spacer"></div><button class="pill-btn mini" data-ptest="${esc(k)}">${t('mcp.test')}</button>${sw(on, `data-pmcp="${esc(k)}" ${p.enabled ? '' : 'disabled'}`)}</div><div class="ext-sub-res hint" data-pres="${esc(k)}"></div>`
+      }).join('')
+      return `<div class="prov-card ext-card${p.enabled ? ' on' : ''}" data-plugin="${esc(p.id)}">
+        <div class="pc-head"><b>${esc(pk(p.name))}</b><code>${esc(p.id)}</code>${p.version ? `<span class="hint">v${esc(p.version)}</span>` : ''}<span class="chip ${p.builtin ? '' : 'busy'}">${p.builtin ? t('ext.builtin') : t('ext.userPlugin')}</span>${p.error ? `<span class="chip warn">${esc(p.error)}</span>` : ''}<div class="spacer"></div>${p.builtin ? '' : `<button class="pill-btn danger mini" data-premove="${esc(p.id)}">${t('ext.remove')}</button>`}${sw(p.enabled, `data-ptoggle="${esc(p.id)}" ${p.error ? 'disabled' : ''}`)}</div>
+        <div class="pc-sub">${esc(pk(p.description))}</div>
+        <div class="pc-models">${parts.map(x => `<span class="pc-model plain">${x}</span>`).join('')}${p.skills.map(s => `<span class="pc-model plain skill">📘 ${esc(s)}</span>`).join('')}</div>
+        ${mcpRows}</div>`
+    }).join('')
+    for (const el of box.querySelectorAll('[data-ptoggle]')) el.onchange = () => saveExt({ plugins: { ...ext.plugins.reduce((o, p) => (o[p.id] = p.enabled, o), {}), [el.dataset.ptoggle]: el.checked } }, el.checked ? t('ext.pluginOn') : t('ext.pluginOff'))
+    for (const el of box.querySelectorAll('[data-pmcp]')) el.onchange = () => saveExt({ pluginMcp: { ...ext.pluginMcp, [el.dataset.pmcp]: el.checked } })
+    for (const el of box.querySelectorAll('[data-premove]')) el.onclick = async () => {
+      if (!confirm(t('ext.removeConfirm', { id: el.dataset.premove }))) return
+      try { ext = await api.removePlugin(el.dataset.premove); renderExt(); extMsg(t('ext.removed')) } catch (e) { extMsg(errText(e), true) }
+    }
+    for (const el of box.querySelectorAll('[data-ptest]')) el.onclick = async () => {
+      const [pid, name] = el.dataset.ptest.split('/')
+      const s = ext.plugins.find(p => p.id === pid).mcpServers.find(x => x.name === name)
+      const res = box.querySelector(`[data-pres="${CSS.escape(el.dataset.ptest)}"]`)
+      el.disabled = true; res.textContent = t('mcp.testing')
+      const r = await api.testMcp(s).catch(e => ({ ok: false, error: errText(e) }))
+      el.disabled = false; res.innerHTML = mcpResult(r)
+    }
+  }
+  const mcpResult = r => r.ok ? `<span class="ok-text">✓ ${t('mcp.ok', { n: r.tools.length, server: esc(r.server?.title || r.server?.name || '') })}</span> ${r.tools.slice(0, 24).map(x => `<code title="${esc(x.description)}">${esc(x.name)}</code>`).join(' ')}` : `<span class="parameter-error">✕ ${esc(r.error || '')}</span>`
+  function renderMcpList() {
+    const box = $('#ext-mcp'), list = ext.mcpServers
+    const fromPlugins = ext.live.mcp.filter(m => m.source !== 'user')
+    box.innerHTML = (list.length ? list.map((s, i) => `<div class="prov-card ext-card${s.enabled ? ' on' : ''}"><div class="pc-head"><b>${esc(s.name)}</b><span class="chip">${s.transport === 'stdio' ? 'stdio' : 'HTTP'}</span><span class="hint ellipsis">${esc(s.transport === 'stdio' ? [s.command, ...s.args].join(' ') : s.url)}</span><div class="spacer"></div><button class="pill-btn mini" data-mtest="${i}">${t('mcp.test')}</button><button class="pill-btn mini" data-medit="${i}">${t('prov.edit')}</button>${sw(s.enabled, `data-mtoggle="${i}"`)}</div>${s.description ? `<div class="pc-sub">${esc(s.description)}</div>` : ''}<div class="ext-sub-res hint" data-mres="${i}"></div></div>`).join('')
+      : `<div class="empty-models hint">${t('ext.noMcp')}</div>`)
+      + (fromPlugins.length ? `<div class="hint ext-foot">${t('ext.mcpFromPlugins', { list: fromPlugins.map(m => `<code>${esc(m.name)}</code> ← ${esc(srcName(m.source))}`).join('　') })}</div>` : '')
+    for (const el of box.querySelectorAll('[data-medit]')) el.onclick = () => openMcp(Number(el.dataset.medit))
+    for (const el of box.querySelectorAll('[data-mtoggle]')) el.onchange = () => saveExt({ mcpServers: list.map((s, i) => i === Number(el.dataset.mtoggle) ? { ...s, enabled: el.checked } : s) })
+    for (const el of box.querySelectorAll('[data-mtest]')) el.onclick = async () => {
+      const res = box.querySelector(`[data-mres="${el.dataset.mtest}"]`)
+      el.disabled = true; res.textContent = t('mcp.testing')
+      const r = await api.testMcp(list[Number(el.dataset.mtest)]).catch(e => ({ ok: false, error: errText(e) }))
+      el.disabled = false; res.innerHTML = mcpResult(r)
+    }
+  }
+  function renderExperts() {
+    const box = $('#ext-experts')
+    const custom = ext.experts.map(e => ({ ...e, source: 'user' }))
+    const fromPlugins = ext.plugins.filter(p => p.enabled).flatMap(p => p.experts.map(e => ({ ...e, source: p.id })))
+    const all = [...custom, ...fromPlugins]
+    if (!all.length) { box.innerHTML = `<div class="empty-models hint">${t('ext.noExperts')}</div>`; return }
+    box.innerHTML = `<div class="ex-grid">${all.map((e, i) => `<div class="ex-card${e.source === 'user' ? ' mine' : ''}" data-ex="${i}"><div class="ex-top"><span class="ex-icon">${esc(e.icon || '🧠')}</span><div><b>${esc(pk(e.title))}</b><div class="hint">${esc(pk(e.name) || '')} · <code>${esc(e.id)}</code></div></div></div><div class="ex-skills">${esc(pk(e.skills))}</div><div class="ex-foot"><span class="chip ${e.source === 'user' ? 'busy' : ''}">${esc(srcName(e.source))}</span>${e.mcp?.length ? `<span class="hint">MCP: ${e.mcp.map(esc).join(', ')}</span>` : ''}<div class="spacer"></div><button class="pill-btn mini" data-exopen="${i}">${e.source === 'user' ? t('prov.edit') : t('ex.copy')}</button></div></div>`).join('')}</div>`
+    for (const el of box.querySelectorAll('[data-exopen]')) el.onclick = () => {
+      const e = all[Number(el.dataset.exopen)]
+      if (e.source === 'user') openExpert(ext.experts.findIndex(x => x.id === e.id))
+      else openExpert(-1, { ...e, id: `${e.id}-custom`, name: pk(e.name), title: pk(e.title), skills: pk(e.skills), prompt: pk(e.prompt) })
+    }
+  }
+  for (const b of document.querySelectorAll('[data-ext-tab]')) b.onclick = () => { extTab = b.dataset.extTab; renderExt() }
+  $('#btn-ext').onclick = () => openExt()
+  $('#ext-plugin-folder').onclick = () => api.pluginDir()
+  $('#ext-plugin-install').onclick = async () => {
+    try { const r = await api.installPlugin(); if (r) { ext = r; renderExt(); extMsg(t('ext.installed')) } } catch (e) { extMsg(errText(e), true) }
+  }
+
+  // MCP editor. Command line is split shell-style: quotes group, so paths with spaces work.
+  let mcpIdx = -1
+  const splitCmd = s => (String(s).match(/"[^"]*"|'[^']*'|\S+/g) || []).map(x => /^(["']).*\1$/.test(x) ? x.slice(1, -1) : x)
+  const joinCmd = a => a.map(x => /\s/.test(x) ? `"${x}"` : x).join(' ')
+  const kvText = o => Object.entries(o || {}).map(([k, v]) => `${k}=${v}`).join('\n')
+  const kvParse = s => { const o = {}; for (const line of String(s).split(/\r?\n/)) { const m = /^\s*([^=:\s]+)\s*[=:]\s*(.*)$/.exec(line); if (m) o[m[1]] = m[2].trim() } return o }
+  function mcpTransportUi() {
+    const http = $('#mcp-transport').value !== 'stdio'
+    for (const el of document.querySelectorAll('.mcp-stdio')) el.classList.toggle('hidden', http)
+    for (const el of document.querySelectorAll('.mcp-http')) el.classList.toggle('hidden', !http)
+    $('#mcp-kv-label').textContent = t(http ? 'mcp.headers' : 'mcp.env')
+    $('#mcp-kv').placeholder = http ? 'Authorization=Bearer ${MY_TOKEN}' : 'GITHUB_TOKEN=${GITHUB_TOKEN}'
+  }
+  function openMcp(i, preset) {
+    mcpIdx = i
+    const s = preset || (i >= 0 ? ext.mcpServers[i] : { name: '', transport: 'stdio', command: '', args: [], env: {}, enabled: true, timeoutMs: 60000 })
+    $('#mcp-head').textContent = t(i >= 0 ? 'mcp.headEdit' : 'mcp.headAdd')
+    $('#mcp-name').value = s.name; $('#mcp-transport').value = s.transport; $('#mcp-desc').value = s.description || ''
+    $('#mcp-command').value = s.transport === 'stdio' ? joinCmd([s.command, ...(s.args || [])].filter(Boolean)) : ''
+    $('#mcp-cwd').value = s.cwd || ''; $('#mcp-url').value = s.url || ''
+    $('#mcp-kv').value = kvText(s.transport === 'stdio' ? s.env : s.headers)
+    $('#mcp-timeout').value = Math.round((s.timeoutMs || 60000) / 1000); $('#mcp-enabled').checked = s.enabled !== false
+    $('#mcp-del').classList.toggle('hidden', i < 0); $('#mcp-msg').textContent = ''; $('#mcp-test-res').textContent = ''; $('#mcp-tools').innerHTML = ''
+    mcpTransportUi()
+    $('#mcp-modal').classList.remove('hidden')
+  }
+  function readMcp() {
+    const transport = $('#mcp-transport').value
+    const s = { name: $('#mcp-name').value.trim(), transport, description: $('#mcp-desc').value.trim(), enabled: $('#mcp-enabled').checked, timeoutMs: Math.round(Number($('#mcp-timeout').value || 60) * 1000) }
+    if (transport === 'stdio') { const parts = splitCmd($('#mcp-command').value.trim()); s.command = parts[0] || ''; s.args = parts.slice(1); s.env = kvParse($('#mcp-kv').value); s.cwd = $('#mcp-cwd').value.trim() }
+    else { s.url = $('#mcp-url').value.trim(); s.headers = kvParse($('#mcp-kv').value) }
+    return P.normalizeMcpServer(s)
+  }
+  $('#mcp-transport').onchange = mcpTransportUi
+  $('#ext-mcp-add').onclick = () => openMcp(-1)
+  $('#mcp-test').onclick = async () => {
+    let s; try { s = readMcp() } catch (e) { $('#mcp-test-res').innerHTML = `<span class="parameter-error">${esc(errText(e))}</span>`; return }
+    $('#mcp-test').disabled = true; $('#mcp-test-res').textContent = t('mcp.testing'); $('#mcp-tools').innerHTML = ''
+    const r = await api.testMcp(s).catch(e => ({ ok: false, error: errText(e) }))
+    $('#mcp-test').disabled = false
+    $('#mcp-test-res').innerHTML = r.ok ? `<span class="ok-text">✓ ${t('mcp.ok', { n: r.tools.length, server: esc(r.server?.title || r.server?.name || '') })}</span>` : `<span class="parameter-error">✕ ${esc(r.error || '')}</span>`
+    if (r.ok) $('#mcp-tools').innerHTML = r.tools.map(x => `<div><code>${esc(x.name)}</code> <span class="hint">${esc(x.description)}</span></div>`).join('')
+  }
+  $('#mcp-save').onclick = async () => {
+    let s; try { s = readMcp() } catch (e) { $('#mcp-msg').textContent = errText(e); return }
+    const list = [...ext.mcpServers]
+    if (mcpIdx >= 0) list[mcpIdx] = s; else list.push(s)
+    if (await saveExt({ mcpServers: list })) $('#mcp-modal').classList.add('hidden')
+    else $('#mcp-msg').textContent = $('#ext-msg').textContent
+  }
+  $('#mcp-del').onclick = async () => {
+    if (mcpIdx < 0 || !confirm(t('mcp.delConfirm', { name: ext.mcpServers[mcpIdx].name }))) return
+    if (await saveExt({ mcpServers: ext.mcpServers.filter((_, i) => i !== mcpIdx) })) $('#mcp-modal').classList.add('hidden')
+  }
+  // Paste a Claude/Cursor-style {"mcpServers":{...}} JSON block to import many servers at once.
+  $('#ext-mcp-paste').onclick = async () => {
+    const raw = prompt(t('ext.mcpPastePrompt'))
+    if (!raw) return
+    try {
+      let j = JSON.parse(raw); j = j.mcpServers || j.servers || j
+      const add = Object.entries(j).map(([name, v]) => P.normalizeMcpServer({ name: name.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 32), ...v, transport: v.url ? 'streamable-http' : 'stdio', enabled: v.disabled !== true }))
+      const names = new Set(add.map(s => s.name.toLowerCase()))
+      await saveExt({ mcpServers: [...ext.mcpServers.filter(s => !names.has(s.name.toLowerCase())), ...add] }, t('ext.mcpImported', { n: add.length }))
+    } catch (e) { extMsg(errText(e), true) }
+  }
+
+  // Expert editor (custom experts; plugin experts can be copied into an editable one).
+  let exIdx = -1
+  function openExpert(i, preset) {
+    exIdx = i
+    const e = preset || (i >= 0 ? ext.experts[i] : { id: '', name: '', title: '', skills: '', prompt: '', icon: '', mcp: [] })
+    $('#ex-head').textContent = t(i >= 0 ? 'ex.headEdit' : 'ex.headAdd')
+    $('#ex-id').value = e.id; $('#ex-id').disabled = i >= 0
+    $('#ex-icon').value = e.icon || ''; $('#ex-title').value = pk(e.title); $('#ex-name').value = pk(e.name); $('#ex-skills').value = pk(e.skills); $('#ex-prompt').value = pk(e.prompt)
+    const names = [...new Set([...ext.live.mcp.map(m => m.name), ...(e.mcp || [])])]
+    $('#ex-mcp').innerHTML = names.length ? names.map(n => `<label class="eff${(e.mcp || []).includes(n) ? ' on' : ''}"><input type="checkbox" value="${esc(n)}" ${(e.mcp || []).includes(n) ? 'checked' : ''}/>${esc(n)}</label>`).join('') : `<span class="hint">${t('ex.noMcp')}</span>`
+    for (const l of $('#ex-mcp').querySelectorAll('label')) l.querySelector('input').onchange = ev => l.classList.toggle('on', ev.target.checked)
+    $('#ex-del').classList.toggle('hidden', i < 0); $('#ex-msg').textContent = ''
+    $('#expert-modal').classList.remove('hidden')
+  }
+  $('#ext-expert-add').onclick = () => openExpert(-1)
+  $('#ex-save').onclick = async () => {
+    let e
+    try {
+      e = P.normalizeExpert({ id: $('#ex-id').value.trim(), icon: $('#ex-icon').value.trim(), title: $('#ex-title').value.trim(), name: $('#ex-name').value.trim(), skills: $('#ex-skills').value.trim(), prompt: $('#ex-prompt').value.trim(), mcp: [...$('#ex-mcp').querySelectorAll('input:checked')].map(x => x.value) })
+    } catch (err) { $('#ex-msg').textContent = errText(err); return }
+    const list = [...ext.experts]
+    if (exIdx >= 0) list[exIdx] = e
+    else { if (list.some(x => x.id === e.id)) { $('#ex-msg').textContent = t('ex.dup', { id: e.id }); return } list.push(e) }
+    if (await saveExt({ experts: list })) $('#expert-modal').classList.add('hidden')
+    else $('#ex-msg').textContent = $('#ext-msg').textContent
+  }
+  $('#ex-del').onclick = async () => {
+    if (exIdx < 0 || !confirm(t('ex.delConfirm', { id: ext.experts[exIdx].id }))) return
+    if (await saveExt({ experts: ext.experts.filter((_, i) => i !== exIdx) })) $('#expert-modal').classList.add('hidden')
+  }
   $('#set-log').onclick = () => api.openLog()
   $('#set-save').onclick = async () => {
     const btn = $('#set-save'); btn.disabled = true

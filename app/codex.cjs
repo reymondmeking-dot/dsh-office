@@ -121,6 +121,8 @@ class CodexRuntime {
     if (this.effort && this.effort !== 'off') a.push('-c', `model_reasoning_effort="${this.effort}"`)
     // Fast mode = Codex's priority service tier. Office's own switch wins; otherwise follow the user's Codex config.
     if ((settings.codexFast ?? configFast())) a.push('-c', 'service_tier="priority"')
+    // Office MCP servers (Settings → Extensions) mount per run; the user's own Codex config is ignored.
+    a.push(...require('./extensions.cjs').codexMcpArgs(this.pool.ext?.mcpServers || [], settings.workspace))
     if (resumeId) a.push(resumeId)
     a.push('-') // prompt on stdin: no quoting problems, no length limit
     return a
@@ -143,7 +145,7 @@ class CodexRuntime {
         else if (it.type === 'file_change') {
           for (const c of it.changes || []) emit({ type: 'tool/call', data: { name: c.kind === 'add' ? 'write' : 'edit', arguments: JSON.stringify({ file_path: c.path }) } })
         } else if (it.type === 'web_search') emit({ type: 'tool/call', data: { name: 'web_search', arguments: '{}' } })
-        else if (it.type === 'mcp_tool_call') emit({ type: 'tool/call', data: { name: it.tool || 'mcp', arguments: '{}' } })
+        else if (it.type === 'mcp_tool_call') emit({ type: 'tool/call', data: { name: `mcp__${it.server || 'mcp'}__${it.tool || 'tool'}`, arguments: '{}' } })
       }
       const line = l => {
         if (!l.trim()) return
