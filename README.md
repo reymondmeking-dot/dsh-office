@@ -63,7 +63,7 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 - 🤖 **Codex CLI 当员工**：直接调用本机已安装并登录的 [Codex CLI](https://github.com/openai/codex)（ChatGPT 账号登录也行，无需 API Key）。「设置 → 服务商」里一键检测，设置里是一张表格：横排是模型，竖列是思考深度，左上角是⚡快速模式开关。滑动某个模型的开关即启用（整列变色并进入果盘，拖给 CEO / HR / 任意员工即可），在某个深度打勾就是它的默认思考深度，改动即时生效；Codex 在项目目录里读写文件、执行命令，多轮对话保持上下文，默认限制在工作区内（Windows 用 elevated 沙箱）。可与 DSH 模型混编同一支团队。
 - 💬 **项目对话窗口**：任务完成后自动弹出，左侧与 CEO 连续对话（带上下文，可追问、让他修改或补充成果），右侧是成果列表；**总结和主要成果一点就看**，对话里提到的文件也能直接点开，被 CEO 改过的文件会标「已更新」。对话记录保存在项目里，随时可回来继续。
 - 🌏 **中英双语界面**：右上角 `EN/中` 一键切换，即时生效。
-- 🧩 **扩展中心：插件、MCP、专家库**（详见下文）。
+- 🧩 **扩展中心：插件、MCP、技能、专家库**（详见下文）。
 
 **English**
 
@@ -77,29 +77,31 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 - 🤖 **Codex CLI as an employee**: calls the [Codex CLI](https://github.com/openai/codex) already installed and signed in on your machine (ChatGPT login works, no API key needed). Detect it under Settings → Providers, settings show a spreadsheet — models across the top, thinking depth down the left, ⚡ fast-mode switch in the corner. Slide a model on to enable it (its column lights up and it joins the fruit tray; drag it onto the CEO, HR or any employee), tick a depth to make it that model's default; changes apply instantly. Codex reads/writes files and runs commands in the project folder, keeps context across turns, and is confined to the workspace by default (elevated sandbox on Windows). Mix it freely with DSH models in one team.
 - 💬 **Project chat window**: pops up when a task finishes. Chat with the CEO with full context (ask follow-ups, have them revise or extend the results) while the right pane lists the deliverables — **click the summary or any main deliverable to read it**, click files mentioned in the conversation, and files the CEO edited are flagged “updated”. Transcripts are saved in the project so you can come back anytime.
 - 🌏 **Bilingual UI (Chinese + English)**: switch instantly with the `EN/中` button in the title bar.
-- 🧩 **Extensions: plugins, MCP and experts** (see below).
+- 🧩 **Extensions: plugins, MCP, skills and experts** (see below).
 
 ---
 
-## 扩展中心：插件 / MCP / 专家 / Extensions: plugins, MCP & experts
+## 扩展中心：插件 / MCP / 技能 / 专家 / Extensions: plugins, MCP, skills & experts
 
-标题栏的 🧩 打开扩展中心，分三页：
+标题栏的 🧩 打开扩展中心，分四页：
 
 - **MCP 服务器**：添加本地命令（stdio）或远程地址（Streamable HTTP）的 [Model Context Protocol](https://modelcontextprotocol.io) 服务器，支持环境变量 / 请求头、超时、单个开关，**测试连接**会真实握手并列出全部工具；也可以直接粘贴 Claude Desktop / Cursor 格式的 `{"mcpServers":{...}}` JSON 批量导入。DSH 模型员工通过 `@deepseek-ai/dsh-mcp-client` 挂载，Codex 员工通过 `codex exec -c mcp_servers.*` 挂载（不读你自己的 Codex 配置），工具名统一为 `mcp__服务器__工具`，在办公室里显示为 🔌。密钥写成 `${GITHUB_TOKEN}` 这类环境变量引用，不会明文写进配置。
-- **专家库**：专家 = 职位 + 核心技能 + 完整工作方法 + 重点使用的 MCP 工具。HR 招人时会拿到专家库清单并优先招专家，被招的员工带上专家设定开工，头像弹窗和资料室分工卡会标出专家身份。内置 8 位（调研、文案、数据分析、前端、产品、设计评审、测试、翻译），可新建，也可把内置专家“复制为我的”再改。
-- **插件**：插件是一个带 `plugin.json` 的文件夹，可以同时打包 MCP 服务器、专家和技能（`skills/<名字>/SKILL.md`，DSH 员工按需加载）。内置「办公室专家库」（默认启用）和「常用 MCP 工具包」（fetch / memory / sequential-thinking，默认关闭）；可从文件夹安装、卸载、单独开关插件里的每个 MCP 服务器。同名时自己添加的优先。
+- **技能**：技能是一份按需加载的操作手册（`SKILL.md`：`name` + `description` 头部 + 正文），员工平时只看到名字和一句说明，用到时才读全文。可以在界面里新建 / 编辑 / 开关 / 删除，导入现成的技能文件夹（兼容 Claude / Codex 格式，脚本等附带文件一并拷贝），也能查看插件自带的技能并“复制为我的”。自己的技能保存在 `<用户数据>/skills`，同名时优先。每次开工前，已启用的技能会同步到工作区 `.agents/skills`（只替换办公室自己放进去的目录，用 `.office-managed.json` 记录）：DSH 员工通过 `skill` 工具加载，Codex 员工按项目技能发现读取，办公室里显示为 📘 学习技能。
+- **专家库**：专家 = 职位 + 核心技能 + 完整工作方法 + 重点使用的 MCP 工具 + 岗位技能。HR 招人时会拿到专家库清单并优先招专家，被招的员工带上专家设定开工，头像弹窗和资料室分工卡会标出专家身份。内置 8 位（调研、文案、数据分析、前端、产品、设计评审、测试、翻译），可新建，也可把内置专家“复制为我的”再改。
+- **插件**：插件是一个带 `plugin.json` 的文件夹，可以同时打包 MCP 服务器、专家和技能（`skills/<名字>/SKILL.md`）。内置「办公室专家库」（默认启用）和「常用 MCP 工具包」（fetch / memory / sequential-thinking，默认关闭）；可从文件夹安装、卸载、单独开关插件里的每个 MCP 服务器。同名时自己添加的优先。
 
 Open the 🧩 Extensions center from the title bar:
 
 - **MCP servers**: add local (stdio) or remote (Streamable HTTP) [MCP](https://modelcontextprotocol.io) servers with env vars / headers, timeouts and per-server switches. **Test** performs a real handshake and lists every tool; you can also paste a Claude Desktop / Cursor `{"mcpServers":{...}}` block. DSH-model employees mount them through `@deepseek-ai/dsh-mcp-client`, Codex employees through `codex exec -c mcp_servers.*` (your own Codex config is ignored). Tools are named `mcp__server__tool` and show up as 🔌 in the office. Write secrets as `${GITHUB_TOKEN}`-style env references; they are never stored in plain text.
-- **Experts**: an expert is a title, core skills, a full working method and the MCP tools it relies on. HR sees the expert library while hiring and prefers experts; hired experts start with their brief, and the agent popup and archive team cards show the badge. Eight are built in (research, copywriting, data analysis, frontend, product, design review, QA, translation); create your own or "copy as mine" to customise.
-- **Plugins**: a plugin is a folder with `plugin.json` that bundles MCP servers, experts and skills (`skills/<name>/SKILL.md`, loaded on demand by DSH employees). Built-ins: "Office expert library" (on) and "Starter MCP pack" (fetch / memory / sequential-thinking, off). Install from a folder, uninstall, and toggle each bundled MCP server. Your own entries win on name clashes.
+- **Skills**: a skill is an on-demand playbook (`SKILL.md` with `name` + `description` frontmatter, then the body). Employees see only the name and description and read the full text when it applies. Create, edit, toggle and delete skills in the UI, import existing skill folders (Claude / Codex format; bundled scripts are copied too), or view a plugin skill and "copy as mine". Your skills live in `<userData>/skills` and win on name clashes. Before work starts the enabled skills are synced into the workspace `.agents/skills` (only folders Office put there are replaced, tracked in `.office-managed.json`): DSH employees load them with the `skill` tool, Codex employees through project skill discovery; the office shows 📘 Learning skill.
+- **Experts**: an expert is a title, core skills, a full working method, the MCP tools it relies on and its role skills. HR sees the expert library while hiring and prefers experts; hired experts start with their brief, and the agent popup and archive team cards show the badge. Eight are built in (research, copywriting, data analysis, frontend, product, design review, QA, translation); create your own or "copy as mine" to customise.
+- **Plugins**: a plugin is a folder with `plugin.json` that bundles MCP servers, experts and skills (`skills/<name>/SKILL.md`). Built-ins: "Office expert library" (on) and "Starter MCP pack" (fetch / memory / sequential-thinking, off). Install from a folder, uninstall, and toggle each bundled MCP server. Your own entries win on name clashes.
 
 ```json
 {
   "id": "my-pack", "name": {"zh": "我的插件", "en": "My pack"}, "version": "1.0.0",
   "mcpServers": [{"name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}}],
-  "experts": [{"id": "seo", "title": {"zh": "SEO 专家", "en": "SEO expert"}, "skills": "keywords, on-page", "prompt": "You are ...", "mcp": ["github"]}],
+  "experts": [{"id": "seo", "title": {"zh": "SEO 专家", "en": "SEO expert"}, "skills": "keywords, on-page", "prompt": "You are ...", "mcp": ["github"], "skillset": ["seo-checklist"]}],
   "skills": "skills"
 }
 ```

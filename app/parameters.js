@@ -141,7 +141,7 @@
         seen.add(e.id)
       }
     }
-    for (const key of ['plugins', 'pluginMcp']) {
+    for (const key of ['plugins', 'pluginMcp', 'skillToggles']) {
       if (raw[key] === undefined) continue
       const o = raw[key]
       if (!o || typeof o !== 'object' || Array.isArray(o) || Object.values(o).some(v => typeof v !== 'boolean')) throw new Error(M('插件开关必须是 { id: true/false }', 'Plugin switches must be { id: true/false }'))
@@ -211,6 +211,9 @@
     const mcp = raw.mcp === undefined ? [] : raw.mcp
     if (!Array.isArray(mcp) || mcp.some(x => !/^[A-Za-z0-9_-]{1,32}$/.test(String(x)))) throw new Error(M(`专家 ${id} 的 MCP 列表不合法`, `Expert ${id}: invalid MCP list`))
     e.mcp = mcp.map(String)
+    const sk = raw.skillset === undefined ? [] : raw.skillset
+    if (!Array.isArray(sk) || sk.some(x => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(x)))) throw new Error(M(`专家 ${id} 的技能列表不合法`, `Expert ${id}: invalid skill list`))
+    e.skillset = sk.map(String)
     return e
   }
   // Missing/zero legacy output caps become explicit, predictable request budgets.
@@ -225,5 +228,5 @@
     }
     return validateSettings(next)
   }
-  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert })
+  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert, msg: M })
 })

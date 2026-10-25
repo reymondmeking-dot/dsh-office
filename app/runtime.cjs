@@ -9,10 +9,19 @@ const os = require('node:os')
 const parameters = require('./parameters.js')
 const { CodexRuntime } = require('./codex.cjs')
 const extensions = require('./extensions.cjs')
-/** Live extensions for a settings snapshot (user plugins dir: $DSH_OFFICE_PLUGIN_DIR, set by main.cjs). */
-function extOf(settings) {
+/**
+ * Live extensions for a settings snapshot (user plugins: $DSH_OFFICE_PLUGIN_DIR,
+ * user skills: $DSH_OFFICE_SKILL_DIR, both set by main.cjs). With stage, the live
+ * skills are copied into <workspace>/.agents/skills for DSH and Codex employees.
+ */
+function extOf(settings, { stage = false } = {}) {
   const plugins = extensions.loadPlugins(process.env.DSH_OFFICE_PLUGIN_DIR || '')
-  return extensions.resolve(settings, plugins)
+  const ext = extensions.resolve(settings, plugins, extensions.listSkills(process.env.DSH_OFFICE_SKILL_DIR || ''))
+  ext.skillDirs = []
+  if (stage) {
+    try { const root = extensions.stageSkills(ext.skills, settings.workspace); if (root) ext.skillDirs.push(root) } catch {}
+  }
+  return ext
 }
 
 /** Locate the Node.js binary the DSH CLI must run under (Windows, macOS, Linux). */
@@ -256,12 +265,12 @@ class RuntimePool {
   constructor(settings, log = () => {}) {
     this.settings = settings; this.log = log; this.runtimes = new Map()
     this.node = findNode(settings.nodePath)
-    this.ext = extOf(settings); this.patchPath = writeProfile(settings, this.ext)
+    this.ext = extOf(settings, { stage: true }); this.patchPath = writeProfile(settings, this.ext)
   }
   configure(settings) {
     this.settings = settings
     this.node = findNode(settings.nodePath)
-    this.ext = extOf(settings); this.patchPath = writeProfile(settings, this.ext)
+    this.ext = extOf(settings, { stage: true }); this.patchPath = writeProfile(settings, this.ext)
     return this.closeAll()
   }
   get(modelKey, rush, effort) {

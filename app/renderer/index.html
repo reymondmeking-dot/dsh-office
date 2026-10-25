@@ -204,7 +204,7 @@
 <div id="ext-modal" class="modal hidden">
   <div class="sheet wide">
     <div class="sheet-head"><div class="h1" data-i18n="ext.head"></div><button class="x" data-close="ext-modal">✕</button></div>
-    <nav class="ext-tabs" role="tablist"><button class="pill-btn on" data-ext-tab="plugins" data-i18n="ext.tabPlugins"></button><button class="pill-btn" data-ext-tab="mcp" data-i18n="ext.tabMcp"></button><button class="pill-btn" data-ext-tab="experts" data-i18n="ext.tabExperts"></button><div class="spacer"></div><span id="ext-live" class="hint"></span></nav>
+    <nav class="ext-tabs" role="tablist"><button class="pill-btn on" data-ext-tab="plugins" data-i18n="ext.tabPlugins"></button><button class="pill-btn" data-ext-tab="mcp" data-i18n="ext.tabMcp"></button><button class="pill-btn" data-ext-tab="skills" data-i18n="ext.tabSkills"></button><button class="pill-btn" data-ext-tab="experts" data-i18n="ext.tabExperts"></button><div class="spacer"></div><span id="ext-live" class="hint"></span></nav>
     <div class="settings-body">
       <div class="ext-pane" data-pane="plugins">
         <div class="group">
@@ -218,6 +218,13 @@
           <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.mcp"></div><div class="spacer"></div><button id="ext-mcp-paste" class="pill-btn" data-i18n="ext.mcpPaste"></button><button id="ext-mcp-add" class="pill-btn primary" data-i18n="ext.mcpAdd"></button></div>
           <div class="hint" data-i18n-html="ext.mcpHint"></div>
           <div id="ext-mcp"></div>
+        </div>
+      </div>
+      <div class="ext-pane hidden" data-pane="skills">
+        <div class="group">
+          <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.skills"></div><div class="spacer"></div><button id="ext-skill-folder" class="pill-btn" data-i18n="ext.openSkillDir"></button><button id="ext-skill-reload" class="pill-btn" data-i18n="ext.skillReload"></button><button id="ext-skill-import" class="pill-btn" data-i18n="ext.skillImport"></button><button id="ext-skill-add" class="pill-btn primary" data-i18n="ext.skillAdd"></button></div>
+          <div class="hint" data-i18n-html="ext.skillsHint"></div>
+          <div id="ext-skills"></div>
         </div>
       </div>
       <div class="ext-pane hidden" data-pane="experts">
@@ -267,9 +274,26 @@
         <label class="span2"><span data-i18n="ex.skills"></span><input id="ex-skills" data-i18n-ph="ex.skillsPh" /></label>
         <label class="span2"><span data-i18n="ex.prompt"></span><textarea id="ex-prompt" rows="9" data-i18n-ph="ex.promptPh"></textarea></label>
         <div class="span2"><span class="hint" data-i18n="ex.mcp"></span><div id="ex-mcp" class="ex-mcp"></div></div>
+        <div class="span2"><span class="hint" data-i18n="ex.skillset"></span><div id="ex-skillset" class="ex-mcp"></div></div>
       </div>
     </div>
     <div class="sheet-foot"><span id="ex-msg" class="hint"></span><div class="spacer"></div><button id="ex-del" class="pill-btn danger" data-i18n="ex.del"></button><button class="pill-btn" data-close="expert-modal" data-i18n="set.cancel"></button><button id="ex-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+  </div>
+</div>
+
+<!-- skill editor -->
+<div id="skill-modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheet-head"><div class="h1" id="sk-head" data-i18n="sk.headAdd"></div><button class="x" data-close="skill-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="group">
+        <label><span data-i18n="sk.name"></span><input id="sk-name" spellcheck="false" placeholder="seo-checklist" /><small class="hint" data-i18n="sk.nameHint"></small></label>
+        <label><span data-i18n="sk.desc"></span><input id="sk-desc" data-i18n-ph="sk.descPh" /><small class="hint" data-i18n="sk.descHint"></small></label>
+        <label><span data-i18n="sk.body"></span><textarea id="sk-body" rows="14" spellcheck="false" data-i18n-ph="sk.bodyPh"></textarea></label>
+        <div id="sk-source" class="hint"></div>
+      </div>
+    </div>
+    <div class="sheet-foot"><span id="sk-msg" class="hint"></span><div class="spacer"></div><button id="sk-del" class="pill-btn danger" data-i18n="sk.del"></button><button class="pill-btn" data-close="skill-modal" data-i18n="set.cancel"></button><button id="sk-save" class="pill-btn primary" data-i18n="set.save"></button></div>
   </div>
 </div>
 

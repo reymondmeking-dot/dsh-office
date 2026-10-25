@@ -141,7 +141,11 @@ class CodexRuntime {
       const emit = ev => { try { onEvent?.(ev) } catch {} }
       const item = it => {
         if (!it) return
-        if (it.type === 'command_execution') emit({ type: 'tool/call', data: { name: WIN ? 'pwsh' : 'bash', arguments: '{}' } })
+        if (it.type === 'command_execution') {
+          // Codex loads a skill by reading its SKILL.md; show that as a skill load.
+          const sk = /[\\/]skills[\\/]([a-z0-9][a-z0-9-]*)[\\/]SKILL\.md/i.exec(String(it.command || ''))
+          emit({ type: 'tool/call', data: sk ? { name: 'skill', arguments: JSON.stringify({ name: sk[1] }) } : { name: WIN ? 'pwsh' : 'bash', arguments: '{}' } })
+        }
         else if (it.type === 'file_change') {
           for (const c of it.changes || []) emit({ type: 'tool/call', data: { name: c.kind === 'add' ? 'write' : 'edit', arguments: JSON.stringify({ file_path: c.path }) } })
         } else if (it.type === 'web_search') emit({ type: 'tool/call', data: { name: 'web_search', arguments: '{}' } })

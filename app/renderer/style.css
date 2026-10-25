@@ -455,3 +455,6 @@ code.file-link { background: #e8f1ff; }
 .ex-foot .chip { margin-top: 0; }
 .ex-mcp { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }.ex-foot .chip { white-space: nowrap; }
 .ex-foot .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+#skill-modal .group > label{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+#skill-modal textarea{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}

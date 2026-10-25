@@ -1220,7 +1220,7 @@
     for (const b of document.querySelectorAll('[data-ext-tab]')) b.classList.toggle('on', b.dataset.extTab === extTab)
     for (const p of document.querySelectorAll('.ext-pane')) p.classList.toggle('hidden', p.dataset.pane !== extTab)
     $('#ext-live').textContent = t('ext.live', { p: ext.plugins.filter(p => p.enabled).length, m: ext.live.mcp.length, e: ext.live.experts.length, s: ext.live.skills.length })
-    renderPlugins(); renderMcpList(); renderExperts()
+    renderPlugins(); renderMcpList(); renderSkills(); renderExperts()
   }
   const sw = (on, attrs = '') => `<label class="sw"><input type="checkbox" ${on ? 'checked' : ''} ${attrs}/><span></span></label>`
   function renderPlugins() {
@@ -1239,7 +1239,7 @@
       return `<div class="prov-card ext-card${p.enabled ? ' on' : ''}" data-plugin="${esc(p.id)}">
         <div class="pc-head"><b>${esc(pk(p.name))}</b><code>${esc(p.id)}</code>${p.version ? `<span class="hint">v${esc(p.version)}</span>` : ''}<span class="chip ${p.builtin ? '' : 'busy'}">${p.builtin ? t('ext.builtin') : t('ext.userPlugin')}</span>${p.error ? `<span class="chip warn">${esc(p.error)}</span>` : ''}<div class="spacer"></div>${p.builtin ? '' : `<button class="pill-btn danger mini" data-premove="${esc(p.id)}">${t('ext.remove')}</button>`}${sw(p.enabled, `data-ptoggle="${esc(p.id)}" ${p.error ? 'disabled' : ''}`)}</div>
         <div class="pc-sub">${esc(pk(p.description))}</div>
-        <div class="pc-models">${parts.map(x => `<span class="pc-model plain">${x}</span>`).join('')}${p.skills.map(s => `<span class="pc-model plain skill">📘 ${esc(s)}</span>`).join('')}</div>
+        <div class="pc-models">${parts.map(x => `<span class="pc-model plain">${x}</span>`).join('')}${p.skills.map(s => `<span class="pc-model plain skill" title="${esc(s.description || '')}">📘 ${esc(s.name)}</span>`).join('')}</div>
         ${mcpRows}</div>`
     }).join('')
     for (const el of box.querySelectorAll('[data-ptoggle]')) el.onchange = () => saveExt({ plugins: { ...ext.plugins.reduce((o, p) => (o[p.id] = p.enabled, o), {}), [el.dataset.ptoggle]: el.checked } }, el.checked ? t('ext.pluginOn') : t('ext.pluginOff'))
@@ -1273,17 +1273,69 @@
       el.disabled = false; res.innerHTML = mcpResult(r)
     }
   }
+  function renderSkills() {
+    const box = $('#ext-skills')
+    const rows = [...ext.skills.map(s => ({ ...s, source: 'user' })), ...ext.plugins.filter(p => p.enabled).flatMap(p => p.skills.map(s => ({ ...s, source: p.id })))]
+    if (!rows.length) { box.innerHTML = `<div class="empty-models hint">${t('ext.noSkills')}</div>`; return }
+    const usedBy = n => [...ext.experts, ...ext.plugins.filter(p => p.enabled).flatMap(p => p.experts)].filter(e => (e.skillset || []).includes(n)).map(e => pk(e.title))
+    box.innerHTML = rows.map((s, i) => {
+      const k = `${s.source}/${s.name}`, on = ext.skillToggles[k] !== false
+      const shadow = on && ext.live.skipped.some(x => x.kind === 'skill' && x.name === s.name && x.source === s.source)
+      const users = usedBy(s.name)
+      return `<div class="prov-card ext-card${on ? ' on' : ''}"><div class="pc-head"><span>📘</span><b>${esc(s.name)}</b><span class="chip ${s.source === 'user' ? 'busy' : ''}">${esc(srcName(s.source))}</span>${shadow ? `<span class="chip warn">${t('ext.shadowed')}</span>` : ''}<div class="spacer"></div><button class="pill-btn mini" data-skopen="${i}">${s.source === 'user' ? t('prov.edit') : t('sk.view')}</button>${sw(on, `data-sktoggle="${esc(k)}"`)}</div><div class="pc-sub">${esc(s.description || '')}</div>${users.length ? `<div class="hint">${t('sk.usedBy', { list: users.map(esc).join('、') })}</div>` : ''}</div>`
+    }).join('')
+    for (const el of box.querySelectorAll('[data-sktoggle]')) el.onchange = () => saveExt({ skillToggles: { ...ext.skillToggles, [el.dataset.sktoggle]: el.checked } })
+    for (const el of box.querySelectorAll('[data-skopen]')) el.onclick = () => { const s = rows[Number(el.dataset.skopen)]; openSkill(s.source, s.name) }
+  }
+  // Skill editor: user skills are editable; plugin skills open read-only and can be copied.
+  let skEdit = null
+  async function openSkill(source, name) {
+    let s = { name: '', description: '', body: '', source: 'user' }
+    if (name) { try { s = await api.readSkill(source, name) } catch (e) { extMsg(errText(e), true); return } }
+    const ro = source && source !== 'user'
+    skEdit = name && !ro ? name : null
+    $('#sk-head').textContent = t(ro ? 'sk.headView' : name ? 'sk.headEdit' : 'sk.headAdd')
+    $('#sk-name').value = s.name || name || ''; $('#sk-desc').value = s.description; $('#sk-body').value = s.body
+    for (const id of ['#sk-name', '#sk-desc', '#sk-body']) $(id).readOnly = ro
+    $('#sk-source').textContent = ro ? t('sk.fromPlugin', { src: srcName(source) }) : ''
+    $('#sk-del').classList.toggle('hidden', !skEdit)
+    $('#sk-save').textContent = ro ? t('ex.copy') : t('set.save')
+    $('#sk-save').dataset.copy = ro ? '1' : ''
+    $('#sk-msg').textContent = ''
+    $('#skill-modal').classList.remove('hidden')
+  }
+  $('#sk-save').onclick = async () => {
+    if ($('#sk-save').dataset.copy) { // plugin skill → editable copy
+      for (const id of ['#sk-name', '#sk-desc', '#sk-body']) $(id).readOnly = false
+      $('#sk-name').value = `${$('#sk-name').value}-mine`.slice(0, 64); $('#sk-head').textContent = t('sk.headAdd'); $('#sk-source').textContent = ''
+      $('#sk-save').dataset.copy = ''; $('#sk-save').textContent = t('set.save'); skEdit = null; return
+    }
+    try {
+      ext = await api.saveSkill({ name: $('#sk-name').value.trim(), description: $('#sk-desc').value.trim(), body: $('#sk-body').value, oldName: skEdit || undefined })
+      renderExt(); extMsg(t('sk.saved')); $('#skill-modal').classList.add('hidden')
+    } catch (e) { $('#sk-msg').textContent = errText(e) }
+  }
+  $('#sk-del').onclick = async () => {
+    if (!skEdit || !confirm(t('sk.delConfirm', { name: skEdit }))) return
+    try { ext = await api.deleteSkill(skEdit); renderExt(); $('#skill-modal').classList.add('hidden') } catch (e) { $('#sk-msg').textContent = errText(e) }
+  }
+  $('#ext-skill-add').onclick = () => openSkill('user', '')
+  $('#ext-skill-folder').onclick = () => api.skillDir()
+  $('#ext-skill-reload').onclick = async () => { try { ext = await api.reloadSkills(); renderExt(); extMsg(t('sk.reloaded', { n: ext.live.skills.length })) } catch (e) { extMsg(errText(e), true) } }
+  $('#ext-skill-import').onclick = async () => {
+    try { const r = await api.importSkill('dir'); if (r) { ext = r; renderExt(); extMsg(t('sk.imported', { list: r.imported.join(', ') })) } } catch (e) { extMsg(errText(e), true) }
+  }
   function renderExperts() {
     const box = $('#ext-experts')
     const custom = ext.experts.map(e => ({ ...e, source: 'user' }))
     const fromPlugins = ext.plugins.filter(p => p.enabled).flatMap(p => p.experts.map(e => ({ ...e, source: p.id })))
     const all = [...custom, ...fromPlugins]
     if (!all.length) { box.innerHTML = `<div class="empty-models hint">${t('ext.noExperts')}</div>`; return }
-    box.innerHTML = `<div class="ex-grid">${all.map((e, i) => `<div class="ex-card${e.source === 'user' ? ' mine' : ''}" data-ex="${i}"><div class="ex-top"><span class="ex-icon">${esc(e.icon || '🧠')}</span><div><b>${esc(pk(e.title))}</b><div class="hint">${esc(pk(e.name) || '')} · <code>${esc(e.id)}</code></div></div></div><div class="ex-skills">${esc(pk(e.skills))}</div><div class="ex-foot"><span class="chip ${e.source === 'user' ? 'busy' : ''}">${esc(srcName(e.source))}</span>${e.mcp?.length ? `<span class="hint">MCP: ${e.mcp.map(esc).join(', ')}</span>` : ''}<div class="spacer"></div><button class="pill-btn mini" data-exopen="${i}">${e.source === 'user' ? t('prov.edit') : t('ex.copy')}</button></div></div>`).join('')}</div>`
+    box.innerHTML = `<div class="ex-grid">${all.map((e, i) => `<div class="ex-card${e.source === 'user' ? ' mine' : ''}" data-ex="${i}"><div class="ex-top"><span class="ex-icon">${esc(e.icon || '🧠')}</span><div><b>${esc(pk(e.title))}</b><div class="hint">${esc(pk(e.name) || '')} · <code>${esc(e.id)}</code></div></div></div><div class="ex-skills">${esc(pk(e.skills))}</div><div class="ex-foot"><span class="chip ${e.source === 'user' ? 'busy' : ''}">${esc(srcName(e.source))}</span>${e.mcp?.length ? `<span class="hint">MCP: ${e.mcp.map(esc).join(', ')}</span>` : ''}${e.skillset?.length ? `<span class="hint" title="${esc(e.skillset.join(', '))}">📘 ${e.skillset.length}</span>` : ''}<div class="spacer"></div><button class="pill-btn mini" data-exopen="${i}">${e.source === 'user' ? t('prov.edit') : t('ex.copy')}</button></div></div>`).join('')}</div>`
     for (const el of box.querySelectorAll('[data-exopen]')) el.onclick = () => {
       const e = all[Number(el.dataset.exopen)]
       if (e.source === 'user') openExpert(ext.experts.findIndex(x => x.id === e.id))
-      else openExpert(-1, { ...e, id: `${e.id}-custom`, name: pk(e.name), title: pk(e.title), skills: pk(e.skills), prompt: pk(e.prompt) })
+      else openExpert(-1, { ...e, id: `${e.id}-custom`, name: pk(e.name), title: pk(e.title), skills: pk(e.skills), prompt: pk(e.prompt), skillset: e.skillset || [] })
     }
   }
   for (const b of document.querySelectorAll('[data-ext-tab]')) b.onclick = () => { extTab = b.dataset.extTab; renderExt() }
@@ -1363,13 +1415,16 @@
   let exIdx = -1
   function openExpert(i, preset) {
     exIdx = i
-    const e = preset || (i >= 0 ? ext.experts[i] : { id: '', name: '', title: '', skills: '', prompt: '', icon: '', mcp: [] })
+    const e = preset || (i >= 0 ? ext.experts[i] : { id: '', name: '', title: '', skills: '', prompt: '', icon: '', mcp: [], skillset: [] })
     $('#ex-head').textContent = t(i >= 0 ? 'ex.headEdit' : 'ex.headAdd')
     $('#ex-id').value = e.id; $('#ex-id').disabled = i >= 0
     $('#ex-icon').value = e.icon || ''; $('#ex-title').value = pk(e.title); $('#ex-name').value = pk(e.name); $('#ex-skills').value = pk(e.skills); $('#ex-prompt').value = pk(e.prompt)
     const names = [...new Set([...ext.live.mcp.map(m => m.name), ...(e.mcp || [])])]
     $('#ex-mcp').innerHTML = names.length ? names.map(n => `<label class="eff${(e.mcp || []).includes(n) ? ' on' : ''}"><input type="checkbox" value="${esc(n)}" ${(e.mcp || []).includes(n) ? 'checked' : ''}/>${esc(n)}</label>`).join('') : `<span class="hint">${t('ex.noMcp')}</span>`
     for (const l of $('#ex-mcp').querySelectorAll('label')) l.querySelector('input').onchange = ev => l.classList.toggle('on', ev.target.checked)
+    const sks = [...new Set([...ext.live.skills.map(s => s.name), ...(e.skillset || [])])]
+    $('#ex-skillset').innerHTML = sks.length ? sks.map(n => `<label class="eff${(e.skillset || []).includes(n) ? ' on' : ''}"><input type="checkbox" value="${esc(n)}" ${(e.skillset || []).includes(n) ? 'checked' : ''}/>📘 ${esc(n)}</label>`).join('') : `<span class="hint">${t('ex.noSkills')}</span>`
+    for (const l of $('#ex-skillset').querySelectorAll('label')) l.querySelector('input').onchange = ev => l.classList.toggle('on', ev.target.checked)
     $('#ex-del').classList.toggle('hidden', i < 0); $('#ex-msg').textContent = ''
     $('#expert-modal').classList.remove('hidden')
   }
@@ -1377,7 +1432,7 @@
   $('#ex-save').onclick = async () => {
     let e
     try {
-      e = P.normalizeExpert({ id: $('#ex-id').value.trim(), icon: $('#ex-icon').value.trim(), title: $('#ex-title').value.trim(), name: $('#ex-name').value.trim(), skills: $('#ex-skills').value.trim(), prompt: $('#ex-prompt').value.trim(), mcp: [...$('#ex-mcp').querySelectorAll('input:checked')].map(x => x.value) })
+      e = P.normalizeExpert({ id: $('#ex-id').value.trim(), icon: $('#ex-icon').value.trim(), title: $('#ex-title').value.trim(), name: $('#ex-name').value.trim(), skills: $('#ex-skills').value.trim(), prompt: $('#ex-prompt').value.trim(), mcp: [...$('#ex-mcp').querySelectorAll('input:checked')].map(x => x.value), skillset: [...$('#ex-skillset').querySelectorAll('input:checked')].map(x => x.value) })
     } catch (err) { $('#ex-msg').textContent = errText(err); return }
     const list = [...ext.experts]
     if (exIdx >= 0) list[exIdx] = e

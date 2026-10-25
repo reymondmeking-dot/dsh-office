@@ -36,6 +36,7 @@ const STATE_FILE = path.join(USER, 'office-state.json')
 const LOG_FILE = path.join(USER, 'office.log')
 const HARNESS_DIR = path.join(USER, 'harness')
 const PLUGIN_DIR = path.join(USER, 'plugins')
+const SKILL_DIR = path.join(USER, 'skills')
 const extensions = require('./extensions.cjs')
 
 /** Where a DSH (deepseek-harness) checkout normally lives on each platform. */
@@ -69,6 +70,7 @@ const DEFAULT_SETTINGS = {
   experts: [],
   plugins: {},
   pluginMcp: {},
+  skillToggles: {},
 }
 const NO_MODEL_MSG = () => T('err.noModel')
 /** Default per-request output cap used to sanity-check a model entry. */
@@ -96,8 +98,9 @@ let settings = parameters.migrateSettings({ ...DEFAULT_SETTINGS, ...loadedSettin
   compaction: loadedSettings.compaction,
 })
 if (JSON.stringify(settings) !== JSON.stringify(loadedSettings)) writeJson(SETTINGS_FILE, settings)
-// runtime.cjs finds user plugins through this (it follows userData; not a setting).
+// runtime.cjs finds user plugins and skills through these (they follow userData; not settings).
 process.env.DSH_OFFICE_PLUGIN_DIR = PLUGIN_DIR
+process.env.DSH_OFFICE_SKILL_DIR = SKILL_DIR
 for (const m of settings.models) if (!Array.isArray(m.efforts)) m.efforts = ['off', 'low', 'medium', 'high']
 const projectsDir = () => path.join(settings.workspace, 'projects')
 
@@ -179,7 +182,7 @@ function initPool() {
   pool = new RuntimePool(settings, log)
 }
 /** Enabled MCP servers / experts / skills right now (what the pool was configured with). */
-const liveExt = () => pool?.ext || extensions.resolve(settings, extensions.loadPlugins(PLUGIN_DIR))
+const liveExt = () => pool?.ext || extensions.resolve(settings, extensions.loadPlugins(PLUGIN_DIR), extensions.listSkills(SKILL_DIR))
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const pace = ms => sleep(state.rush ? ms / 3 : ms)
@@ -197,6 +200,7 @@ function toolLabel(name, args) {
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name || '')
   if (mcp) return T('tool.mcp', { server: mcp[1], name: mcp[2] })
+  if (name === 'skill' && (a.name || a.skill)) return T('tool.skillNamed', { name: String(a.name || a.skill) })
   return map[name] || T('tool.other', { name })
 }
 
@@ -206,6 +210,7 @@ async function runAgent(a, sessionTag, prompt, rush) {
   const text = await rt.run(sessionId, prompt, ev => {
     if (ev.type === 'tool/call') {
       if (/^mcp__/.test(ev.data.name || '')) log(`mcp ${a.name} ${ev.data.name}`)
+      if (ev.data.name === 'skill') log(`skill ${a.name} ${String(ev.data.arguments || '').slice(0, 120)}`)
       setAgent(a.id, { activity: toolLabel(ev.data.name, ev.data.arguments) })
     }
     else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('typing', { id: a.id })
@@ -450,8 +455,8 @@ ${goalJson}`, rush()))
   const lang = EN() ? 'en' : 'zh'
   const pk = v => extensions.pick(v, lang)
   const expertNote = () => live.experts.length ? (EN()
-    ? `## Expert library (prefer these when a role fits; set "expert" to the id, and you may still pick the name)\n${live.experts.map(e => `- ${e.id}: ${pk(e.title)}${pk(e.skills) ? ` (${pk(e.skills)})` : ''}${e.mcp.length ? ` [tools: ${e.mcp.join(', ')}]` : ''}`).join('\n')}\n\n`
-    : `## 专家库（岗位合适时优先招专家：把 "expert" 设为专家 id，名字仍可自己起）\n${live.experts.map(e => `- ${e.id}：${pk(e.title)}${pk(e.skills) ? `（${pk(e.skills)}）` : ''}${e.mcp.length ? ` [工具：${e.mcp.join('、')}]` : ''}`).join('\n')}\n\n`) : ''
+    ? `## Expert library (prefer these when a role fits; set "expert" to the id, and you may still pick the name)\n${live.experts.map(e => `- ${e.id}: ${pk(e.title)}${pk(e.skills) ? ` (${pk(e.skills)})` : ''}${e.mcp.length ? ` [tools: ${e.mcp.join(', ')}]` : ''}${e.skillset?.length ? ` [skills: ${e.skillset.join(', ')}]` : ''}`).join('\n')}\n\n`
+    : `## 专家库（岗位合适时优先招专家：把 "expert" 设为专家 id，名字仍可自己起）\n${live.experts.map(e => `- ${e.id}：${pk(e.title)}${pk(e.skills) ? `（${pk(e.skills)}）` : ''}${e.mcp.length ? ` [工具：${e.mcp.join('、')}]` : ''}${e.skillset?.length ? ` [技能：${e.skillset.join('、')}]` : ''}`).join('\n')}\n\n`) : ''
   const hrPrompt = EN() ? `${harness('hr', { minTeam: settings.minTeam, maxTeam: settings.maxTeam })}
 
 ## This task
@@ -592,6 +597,12 @@ ${rec.report}
       const list = live.mcpServers.map(s => `- ${s.name}${s.description ? `: ${s.description}` : ''} (mcp__${s.name}__*)`).join('\n')
       out += EN() ? `\n\n## MCP tools available\n${list}${mine.length ? `\nYour expert role relies on: ${mine.map(s => s.name).join(', ')}. Use them where they help.` : ''}`
         : `\n\n## 可用的 MCP 工具\n${list}${mine.length ? `\n你的专家岗位重点使用：${mine.map(s => s.name).join('、')}，需要时直接调用。` : ''}`
+    }
+    const mySkills = ex?.skillset?.length ? live.skills.filter(s => ex.skillset.includes(s.name)) : []
+    if (mySkills.length) {
+      const list = mySkills.map(s => `- ${s.name}${s.description ? `: ${s.description}` : ''}`).join('\n')
+      out += EN() ? `\n\n## Skills for your role\nLoad these with the skill tool (or read .agents/skills/<name>/SKILL.md) before the matching step and follow them:\n${list}`
+        : `\n\n## 你的岗位技能\n在对应步骤前用 skill 工具加载（或读取 .agents/skills/<名字>/SKILL.md）并照做：\n${list}`
     }
     return out
   }
@@ -1133,14 +1144,16 @@ ipcMain.handle('office:saveSettings', async (_e, next) => {
 })
 ipcMain.handle('office:openLog', () => shell.openPath(LOG_FILE))
 
-// ---------- extensions: plugins / MCP / experts ----------
+// ---------- extensions: plugins / MCP / skills / experts ----------
 const extInfo = () => {
   const plugins = extensions.loadPlugins(PLUGIN_DIR)
-  const live = extensions.resolve(settings, plugins)
+  const userSkills = extensions.listSkills(SKILL_DIR)
+  const live = extensions.resolve(settings, plugins, userSkills)
   return {
-    pluginDir: PLUGIN_DIR, plugins: plugins.map(p => extensions.publicPlugin(p, settings)),
-    mcpServers: settings.mcpServers || [], experts: settings.experts || [], pluginMcp: settings.pluginMcp || {},
-    live: { mcp: live.mcpServers.map(s => ({ name: s.name, source: s.source })), experts: live.experts.map(e => ({ id: e.id, source: e.source })), skills: live.skills.map(s => ({ name: s.name, source: s.source })), skipped: live.skipped },
+    pluginDir: PLUGIN_DIR, skillDir: SKILL_DIR, plugins: plugins.map(p => extensions.publicPlugin(p, settings)),
+    mcpServers: settings.mcpServers || [], experts: settings.experts || [], pluginMcp: settings.pluginMcp || {}, skillToggles: settings.skillToggles || {},
+    skills: userSkills.map(s => ({ name: s.name, description: s.description })),
+    live: { mcp: live.mcpServers.map(s => ({ name: s.name, source: s.source })), experts: live.experts.map(e => ({ id: e.id, source: e.source })), skills: live.skills.map(s => ({ name: s.name, source: s.source, description: s.description })), skipped: live.skipped },
   }
 }
 async function saveExt(patch) {
@@ -1151,12 +1164,48 @@ async function saveExt(patch) {
   await pool.configure(settings)
   return extInfo()
 }
+/** Skill files changed on disk: re-stage them for the next task. */
+async function skillsChanged() {
+  if (current) throw new Error(T('err.settingsBusy'))
+  await pool.configure(settings)
+  return extInfo()
+}
 ipcMain.handle('office:extInfo', () => extInfo())
 ipcMain.handle('office:saveExt', (_e, patch = {}) => {
   const allowed = {}
-  for (const k of ['mcpServers', 'experts', 'plugins', 'pluginMcp']) if (patch[k] !== undefined) allowed[k] = patch[k]
+  for (const k of ['mcpServers', 'experts', 'plugins', 'pluginMcp', 'skillToggles']) if (patch[k] !== undefined) allowed[k] = patch[k]
   return saveExt(allowed)
 })
+// Skill bodies are read lazily: the list only carries name + description.
+const skillFile = (source, name) => {
+  const list = source === 'user' ? extensions.listSkills(SKILL_DIR) : (extensions.loadPlugins(PLUGIN_DIR).find(p => p.id === source)?.skills || [])
+  const s = list.find(x => x.name === name)
+  if (!s) throw new Error(`skill not found: ${source}/${name}`)
+  return s.file
+}
+ipcMain.handle('office:readSkill', (_e, source, name) => ({ ...extensions.readSkill(skillFile(source, name)), source }))
+ipcMain.handle('office:saveSkill', (_e, s = {}) => {
+  if (current) throw new Error(T('err.settingsBusy'))
+  extensions.saveUserSkill(SKILL_DIR, s)
+  return skillsChanged()
+})
+ipcMain.handle('office:deleteSkill', (_e, name) => {
+  if (current) throw new Error(T('err.settingsBusy'))
+  extensions.deleteUserSkill(SKILL_DIR, name)
+  const skillToggles = { ...(settings.skillToggles || {}) }; delete skillToggles[`user/${name}`]
+  return saveExt({ skillToggles })
+})
+ipcMain.handle('office:importSkill', async (_e, kind) => {
+  if (current) throw new Error(T('err.settingsBusy'))
+  const r = await dialog.showOpenDialog(win, kind === 'file'
+    ? { properties: ['openFile', 'multiSelections'], filters: [{ name: 'Markdown', extensions: ['md'] }], title: T('ext.pickSkill') }
+    : { properties: ['openDirectory'], title: T('ext.pickSkill') })
+  if (r.canceled) return null
+  const names = r.filePaths.flatMap(f => extensions.importSkills(f, SKILL_DIR))
+  return { ...(await skillsChanged()), imported: names }
+})
+ipcMain.handle('office:skillDir', () => { fs.mkdirSync(SKILL_DIR, { recursive: true }); return shell.openPath(SKILL_DIR) })
+ipcMain.handle('office:reloadSkills', () => skillsChanged())
 ipcMain.handle('office:testMcp', (_e, server) => extensions.testMcp(server, { cwd: settings.workspace }))
 ipcMain.handle('office:installPlugin', async (_e, dir) => {
   if (!dir) {
