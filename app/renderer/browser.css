@@ -1,0 +1,47 @@
+/* Browsing surfaces inherit the Office shell tokens. Guest content lives in a
+   sandboxed WebContentsView, positioned over #browser-viewport by the main process. */
+.browser-sheet { width: min(1380px, calc(100vw - 48px)); height: calc(100vh - 100px); max-height: 900px; display: flex; flex-direction: column; overflow: hidden; }
+.browser-sheet .sheet-head { flex-shrink: 0; }
+.browser-tabbar { display: flex; align-items: center; gap: var(--space-2, 8px); padding: 0 var(--space-4, 16px); background: var(--surface-muted, #edf0f5); }
+#browser-tabs { display: flex; overflow-x: auto; gap: 4px; flex: 1; min-width: 0; padding-top: 8px; }
+.browser-tab { display: flex; align-items: center; min-width: 100px; max-width: 240px; padding: 8px 10px; gap: 8px; border: 0; border-radius: 9px 9px 0 0; background: transparent; font-size: 12px; color: var(--sub); }
+.browser-tab[aria-selected=true] { background: var(--surface, #fff); color: var(--text); }
+.browser-tab .tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-tab .tab-close { margin-left: auto; border: 0; border-radius: 4px; color: inherit; background: transparent; padding: 3px 5px; }
+.browser-tab .tab-close:hover { background: var(--line); }
+.browser-toolbar { display: flex; align-items: center; gap: 6px; padding: 10px 16px; flex-shrink: 0; background: var(--surface, #fff); }
+.browser-toolbar .icon-btn { flex-shrink: 0; width: 32px; height: 32px; }
+#browser-address { flex: 1; min-width: 100px; }
+.browser-watch { display: flex; gap: 16px; align-items: center; padding: 8px 18px; background: var(--accent-soft, #e5efff); color: var(--text); font-size: 12px; flex-shrink: 0; }
+.browser-progress { height: 2px; background: var(--line); flex-shrink: 0; overflow: hidden; }
+.browser-progress.loading::before { content: ''; display: block; height: 100%; width: 35%; background: var(--blue); animation: browser-loading 1.5s ease-in-out infinite; }
+@keyframes browser-loading { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+#browser-viewport { flex: 1; min-height: 100px; background: #fff; position: relative; }
+.browser-empty { display: flex; height: 100%; flex-direction: column; justify-content: center; align-items: center; color: var(--sub); padding: 24px; text-align: center; }
+.browser-empty h2 { font-size: 18px; color: var(--text); margin: 18px 0 8px; }
+.browser-empty p { max-width: 48ch; font-size: 13px; line-height: 1.65; }
+.browser-footer { display: flex; justify-content: space-between; gap: 20px; align-items: center; min-height: 32px; padding: 6px 18px; color: var(--sub); font-size: 12px; flex-shrink: 0; }
+.browser-footer span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#browser-modal { z-index: 150; }
+#file-modal { z-index: 160; }
+#vault-modal { z-index: 170; }
+#browser-confirm-modal { z-index: 180; }
+.file-sheet { display: flex; flex-direction: column; height: min(820px, calc(100vh - 90px)); }
+#file-heading { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 65%; }
+#file-content { overflow: auto; padding: 28px 40px 48px; user-select: text; line-height: 1.7; font-size: 14px; }
+#file-content > :first-child { margin-top: 0; }
+#file-content pre { overflow: auto; background: var(--surface-muted, #f0f2f6); border-radius: 10px; padding: 18px; line-height: 1.6; }
+#file-content code { font-family: Consolas, 'Cascadia Code', monospace; }
+#file-content .lnk { color: var(--blue); text-decoration: underline; cursor: pointer; }
+.vault-sheet { width: min(720px, calc(100vw - 48px)); }
+.vault-body { padding: 16px 24px 24px; overflow-y: auto; max-height: 65vh; }
+.vault-site { display: flex; align-items: center; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.vault-site .site-label { flex: 1; min-width: 0; }
+.vault-site strong, .vault-site small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-site small { margin-top: 5px; color: var(--sub); font-size: 12px; }
+.browser-confirm-sheet { width: min(500px, calc(100vw - 48px)); }
+#browser-confirm-origin { display: block; overflow-wrap: anywhere; padding: 10px; }
+.browser-confirm-sheet p { line-height: 1.7; margin-top: 0; }
+#browser-settings textarea { width: 100%; }
+@media (max-width: 1300px) { .browser-sheet { width: calc(100vw - 32px); height: calc(100vh - 80px); } #titlebar { gap: 7px; } #titlebar #status-pill { max-width: 180px; } .browser-entry { padding-inline: 10px; } }
+@media (prefers-reduced-motion: reduce) { .browser-progress.loading::before { animation: none; width: 70%; } }

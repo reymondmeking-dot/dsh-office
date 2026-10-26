@@ -12,6 +12,8 @@ const prov = require('./providers.cjs')
 const agents = require('./agents.cjs')
 const codexCli = require('./codex.cjs')
 const I18N = require('./renderer/i18n.js')
+require('./renderer/browser-i18n.js')
+require('./renderer/resources-i18n.js')
 const T = (k, v) => I18N.t(k, v)
 const jn = a => a.join(I18N.getLang() === 'en' ? ', ' : '、')
 /** UI language picks the agents' working language too: prompts, harness, names, file names. */
@@ -71,6 +73,8 @@ const DEFAULT_SETTINGS = {
   plugins: {},
   pluginMcp: {},
   skillToggles: {},
+  browser: parameters.DEFAULT_BROWSER,
+  cliResources: {},
 }
 const NO_MODEL_MSG = () => T('err.noModel')
 /** Default per-request output cap used to sanity-check a model entry. */
@@ -164,7 +168,7 @@ function effortOf(a) {
   return below[0] || offered[0]
 }
 
-let win
+let win, browser, cli
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload) }
 const emit = (type, data = {}) => send('office:event', { type, ...data, t: Date.now() })
 function setAgent(id, patch) {
@@ -199,23 +203,29 @@ function toolLabel(name, args) {
     skill: T('tool.skill'), subagent: T('tool.subagent'), read_image: T('tool.image'),
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name || '')
+  if (mcp?.[1] === 'office-browser') {
+    const key = mcp[2].replace(/^browser_/, '')
+    let site = ''; try { site = new URL(a.url || a.origin || '').hostname } catch {}
+    return T('browser.act.' + (['search','open','snapshot','click','type','select','scroll','screenshot','read_file','login'].includes(key) ? key : 'open'), { site })
+  }
+  if (mcp?.[1] === 'office-cli') return T('tool.cli', { resource: a.resource === 'github' ? 'GitHub CLI' : a.resource === 'taptap' ? 'TapTap CLI' : 'CLI' })
   if (mcp) return T('tool.mcp', { server: mcp[1], name: mcp[2] })
   if (name === 'skill' && (a.name || a.skill)) return T('tool.skillNamed', { name: String(a.name || a.skill) })
   return map[name] || T('tool.other', { name })
 }
 
 async function runAgent(a, sessionTag, prompt, rush) {
-  const rt = pool.get(modelOf(a), rush, effortOf(a))
   const sessionId = `${a.id}-${sessionTag}-${crypto.randomBytes(4).toString('hex')}`
-  const text = await rt.run(sessionId, prompt, ev => {
+  const context = { id: sessionId, projectDir: current?.dir || settings.workspace, owner: shownName(a) }
+  const rt = pool.get(modelOf(a), rush, effortOf(a), context)
+  try { return await rt.run(sessionId, prompt, ev => {
     if (ev.type === 'tool/call') {
       if (/^mcp__/.test(ev.data.name || '')) log(`mcp ${a.name} ${ev.data.name}`)
       if (ev.data.name === 'skill') log(`skill ${a.name} ${String(ev.data.arguments || '').slice(0, 120)}`)
       setAgent(a.id, { activity: toolLabel(ev.data.name, ev.data.arguments) })
     }
     else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('typing', { id: a.id })
-  })
-  return text
+  }) } finally { await pool.releaseSession?.(sessionId) }
 }
 
 function parseJson(text) {
@@ -236,11 +246,16 @@ const projectFile = dir => path.join(dir, '.office', 'project.json')
 function saveProject(p) { writeJson(projectFile(p.dir), p) }
 
 function listProjects() {
-  const root = projectsDir()
-  if (!fs.existsSync(root)) return []
-  return fs.readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory())
-    .map(d => readJson(projectFile(path.join(root, d.name)), null)).filter(Boolean)
-    .sort((a, b) => b.createdAt - a.createdAt)
+  return projectStorage().list()
+}
+let projectStore
+function projectStorage() { return projectStore ||= new (require('./projects.cjs').ProjectStore)({ getWorkspace: () => settings.workspace }) }
+function planTask(input = {}) {
+  const parent = input.projectId ? listProjects().find(p => p.id === input.projectId && p.kind === 'workspace') : null
+  if (input.projectId && !parent) throw new Error(L('请选择有效项目', 'Select a valid project'))
+  const id = `${stamp()}-${slug(input.title)}-${crypto.randomBytes(3).toString('hex')}`
+  const dir = path.join(parent ? path.join(parent.dir, 'tasks') : projectsDir(), id)
+  return { id, dir, rel: path.relative(settings.workspace, dir).split(path.sep).join('/'), parentProjectId: parent?.id || null }
 }
 
 function listFiles(dir) {
@@ -295,15 +310,19 @@ const fmtSize = b => b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB` : b >= 1 
 async function submitTask(input) {
   if (!settings.models?.length) throw new Error(NO_MODEL_MSG())
   const createdAt = Date.now()
-  const name = `${stamp()}-${slug(input.title)}`
-  const dir = path.join(projectsDir(), name)
+  const planned = input.locationConfirmed && input.location ? input.location : planTask(input)
+  const name = String(planned.id || '')
+  if (!name || /[\\/:*?"<>|\x00-\x1f]/.test(name) || name === '.' || name === '..') throw new Error(L('任务目录标识无效', 'Invalid task directory ID'))
+  const dir = require('./browser-policy.cjs').workspacePath(settings.workspace, planned.dir, { create: true })
+  if (fs.existsSync(projectFile(dir))) throw new Error(L('项目目录已存在，请重新确认位置', 'The project folder already exists; confirm a new location'))
   fs.mkdirSync(path.join(dir, '.office'), { recursive: true })
   const p = {
-    id: name, title: input.title, brief: input.brief || '', rush: !!input.rush, dir, rel: `projects/${name}`, continueOf: input.continueOf || null,
+    id: name, title: input.title, brief: input.brief || '', rush: !!input.rush, dir, rel: path.relative(settings.workspace, dir).split(path.sep).join('/'), continueOf: input.continueOf || null, parentProjectId: planned.parentProjectId || null,
     createdAt, status: 'queued', phase: '排队中', team: [], assignments: [], reports: [], summary: '', color: Math.floor(Math.random() * 8),
   }
   p.attachments = await copyAttachments(dir, input.attachments)
   saveProject(p)
+  projectStorage().register(dir)
   queue.push(p)
   emit('project', { project: p })
   if (input.rush && !state.rush) setRush(true)
@@ -757,10 +776,9 @@ function setRush(on) {
 }
 
 // ---------- project chat: talk to the CEO about a finished project ----------
-const chatFile = p => path.join(p.dir, '.office', 'chat.json')
-const readChat = p => { const v = readJson(chatFile(p), []); return Array.isArray(v) ? v : [] }
+const readChat = (p, cid = 'default') => projectStorage().readConversation(p, cid).messages
+const writeChat = (p, cid, messages) => projectStorage().writeConversation(p, cid, messages)
 /** projectId -> { sid, rt }. One CEO session per project keeps its context across turns. */
-const chatSessions = new Map()
 const chatBusy = new Set()
 const fileRec = f => ({ rel: f.rel, path: f.path, size: f.size, mtime: f.mtime })
 
@@ -823,7 +841,7 @@ ${talk ? `\n之前的对话：\n${talk}\n` : ''}
 4. 不要修改「附件」文件夹里的原件。`
 }
 
-async function chatSend(id, input) {
+async function chatSend(id, input, conversationId = 'default') {
   const text = String(input || '').trim()
   if (!text) throw new Error(T('err.chatEmpty'))
   const p = listProjects().find(x => x.id === id)
@@ -834,21 +852,25 @@ async function chatSend(id, input) {
   chatBusy.add(id)
   const ceo = agent('ceo')
   const solo = !current // do not touch the CEO's office status while a project is running
+  const sid = `ceo-chat-${id}-${crypto.randomBytes(5).toString('hex')}`
   try {
-    const history = readChat(p)
+    const history = readChat(p, conversationId)
     history.push({ role: 'user', text, at: Date.now() })
-    writeJson(chatFile(p), history)
-    const rt = pool.get(modelOf(ceo), false, effortOf(ceo))
-    let sess = chatSessions.get(id)
-    const fresh = !sess || sess.rt !== rt
-    if (fresh) { sess = { sid: `ceo-chat-${crypto.randomBytes(5).toString('hex')}`, rt }; chatSessions.set(id, sess) }
-    const prompt = fresh ? `${chatContextPrompt(p, history.slice(0, -1))}\n\n${L('## 老板说', '## The boss says')}\n${text}` : text
+    writeChat(p, conversationId, history)
+    const rt = pool.get(modelOf(ceo), false, effortOf(ceo), { id: sid, projectDir: p.dir, owner: shownName(ceo) })
+    const references = projectStorage().references(p, conversationId)
+    const sources = references.map(r => `${r.title}\n${L('来源目录', 'Source folder')}: ${r.dir}\n${L('已完成内容摘要', 'Completed work summary')}: ${r.summary || ''}`).join('\n\n')
+    const sourcePrompt = sources ? L(`\n\n## 用户选择引用的已完成项目\n以下是只读参考，请按需读取文件并保留来源，不要修改这些源项目。\n${sources}`, `\n\n## Completed projects selected by the user\nThese are read-only references. Read their files as needed, preserve provenance, and do not modify these source projects.\n${sources}`) : ''
+    const prompt = `${chatContextPrompt(p, history.slice(0, -1))}${sourcePrompt}\n\n${L('## 老板说', '## The boss says')}\n${text}`
     const sig = list => new Map(list.map(f => [f.rel, `${f.size}:${Math.round(f.mtime)}`]))
     const before = sig(listFiles(p.dir))
     if (solo) setAgent('ceo', { status: 'busy', activity: T('act.chatting') })
     emit('chat-status', { project: id, text: T('chat.thinking', { name: ceo?.name || 'CEO' }) })
-    const out = await rt.run(sess.sid, prompt, ev => {
-      if (ev.type === 'tool/call') emit('chat-status', { project: id, text: toolLabel(ev.data.name, ev.data.arguments) })
+    const out = await rt.run(sid, prompt, ev => {
+      if (ev.type === 'tool/call') {
+        if (/^mcp__/.test(ev.data.name || '')) log(`mcp ${ceo.name} ${ev.data.name}`)
+        emit('chat-status', { project: id, text: toolLabel(ev.data.name, ev.data.arguments) })
+      }
       else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('chat-status', { project: id, text: T('chat.thinking', { name: ceo?.name || 'CEO' }) })
     })
     const reply = (out || '').trim() || T('chat.noReply')
@@ -862,14 +884,14 @@ async function chatSend(id, input) {
     }
     files.sort((a, b) => (b.changed - a.changed) || a.rel.localeCompare(b.rel))
     const message = { role: 'ceo', text: reply, at: Date.now(), files: files.slice(0, 12) }
-    const latest = readChat(p); latest.push(message); writeJson(chatFile(p), latest)
+    const latest = readChat(p, conversationId); latest.push(message); writeChat(p, conversationId, latest)
     if (solo) emit('say', { id: 'ceo', text: reply.slice(0, 60), ms: 4000 })
     return { message, products: productsOf(p) }
   } catch (err) {
-    chatSessions.delete(id) // next turn rebuilds the context from the saved transcript
     log(`chat ${id} failed: ${err.stack || err}`)
     throw err
   } finally {
+    await pool.releaseSession?.(sid)
     chatBusy.delete(id)
     emit('chat-status', { project: id, text: '' })
     if (solo && !current) setAgent('ceo', { status: 'idle', activity: T('act.chatDone') })
@@ -878,20 +900,24 @@ async function chatSend(id, input) {
 
 /** Resolve a path and make sure it stays inside the projects folder. */
 function inProjects(file) {
-  const root = path.resolve(projectsDir())
-  const full = path.resolve(String(file))
-  if (full !== root && !full.startsWith(root + path.sep)) throw new Error('outside projects')
-  return full
+  return require('./browser-policy.cjs').workspacePath(settings.workspace, String(file))
 }
 
 // ---------- IPC ----------
-ipcMain.handle('office:chatHistory', (_e, id) => {
+ipcMain.handle('office:chatHistory', (_e, id, conversationId = 'default') => {
   const p = listProjects().find(x => x.id === id); if (!p) return null
-  let messages = readChat(p)
+  let messages = readChat(p, conversationId)
   if (!messages.length && p.summary) messages = [{ role: 'ceo', text: p.summary, at: p.finishedAt || p.createdAt, seed: true }]
-  return { id: p.id, title: p.title, status: p.status, messages, products: productsOf(p), busy: chatBusy.has(id) }
+  return { id: p.id, title: p.title, dir: p.dir, conversationId, conversations: projectStorage().conversations(p), references: projectStorage().references(p, conversationId), status: p.status, messages, products: productsOf(p), busy: chatBusy.has(id) }
 })
-ipcMain.handle('office:chatSend', (_e, id, text) => chatSend(id, text))
+ipcMain.handle('office:chatSend', (_e, id, text, conversationId) => chatSend(id, text, conversationId))
+const projectById = id => { const p = listProjects().find(p => p.id === id); if (!p) throw new Error(T('err.chatNoProject')); return p }
+ipcMain.handle('office:taskLocation', (_e, input) => planTask(input))
+ipcMain.handle('office:projectPreview', (_e, input) => projectStorage().preview(input))
+ipcMain.handle('office:createProject', (_e, input) => { const p = projectStorage().create(input); emit('project', { project: p }); return p })
+ipcMain.handle('office:conversations', (_e, id) => projectStorage().conversations(projectById(id)))
+ipcMain.handle('office:createConversation', (_e, id, input) => projectStorage().createConversation(projectById(id), input))
+ipcMain.handle('office:setConversationReferences', (_e, id, cid, refs) => projectStorage().setReferences(projectById(id), cid, refs))
 ipcMain.handle('office:readImage', (_e, file) => {
   const full = inProjects(file)
   const st = fs.statSync(full)
@@ -1114,7 +1140,27 @@ ipcMain.handle('office:readFile', (_e, file) => {
   if (buf.includes(0)) return { binary: true }
   return { text: buf.toString('utf8') }
 })
-ipcMain.handle('office:open', (_e, p) => shell.openPath(p))
+ipcMain.handle('office:browser', (e, action, args) => {
+  if (e.sender !== win?.webContents) throw new Error('Untrusted browser request')
+  return browser.ui(action, args)
+})
+ipcMain.handle('office:detectCli', () => cli.detect({ refresh: true }))
+ipcMain.handle('office:saveCliResources', async (_e, input) => {
+  if (input?.confirmed !== true) throw new Error(L('请先确认 CLI 授权', 'Confirm the CLI grant first'))
+  const next = parameters.validateSettings({ ...settings, cliResources: input.enabled })
+  const detected = await cli.detect()
+  for (const [id, enabled] of Object.entries(next.cliResources)) if (enabled) {
+    const r = detected.resources.find(r => r.id === id)
+    if (!r?.installed || !(r.authenticated || r.credentialAvailable)) throw new Error(L('资源未安装或没有可用登录，请先检测', 'The resource is missing or not signed in; detect it first'))
+  }
+  writeJson(SETTINGS_FILE, next); settings = next
+  return settings.cliResources
+})
+ipcMain.handle('office:open', async (_e, p) => {
+  const full = inProjects(p)
+  if (fs.statSync(full).isDirectory()) return shell.openPath(full)
+  const file = await browser.ui('file', { path: full }); emit('file-open', { file }); return { internal: true }
+})
 ipcMain.handle('office:reveal', (_e, p) => shell.showItemInFolder(p))
 ipcMain.handle('office:harnessDir', () => shell.openPath(HARNESS_DIR))
 ipcMain.handle('office:harness', (_e, name) => fs.readFileSync(harnessFile(name), 'utf8'))
@@ -1229,12 +1275,18 @@ ipcMain.on('win:close', () => win?.close())
 
 // ---------- app ----------
 if (!app.requestSingleInstanceLock()) app.quit()
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus() } })
+app.on('second-instance', () => { if (win && process.env.DSH_OFFICE_HEADLESS !== '1') { if (win.isMinimized()) win.restore(); win.focus() } })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   ensureHarness()
   fs.mkdirSync(projectsDir(), { recursive: true })
+  const { BrowserService } = require('./browser.cjs')
+  cli = new (require('./cli-resources.cjs').CliResources)({ getSettings: () => settings })
+  browser = new BrowserService({ getWindow: () => win, getSettings: () => settings, emit, log, userData: USER, cliTool: (name, args, context) => cli.tool(name, args, context) })
+  const bridge = await browser.start()
+  process.env.DSH_OFFICE_BROWSER_URL = bridge.url
+  process.env.DSH_OFFICE_BROWSER_TOKEN = bridge.token
   initPool()
   // Recover projects interrupted by a previous exit.
   for (const p of listProjects()) if (!['done', 'failed'].includes(p.status)) { p.status = 'failed'; p.phase = '应用退出时中断'; saveProject(p) }
@@ -1245,6 +1297,7 @@ app.whenReady().then(() => {
   })
   // DSH_OFFICE_HEADLESS=1 keeps the window hidden (automated screenshots / UI audits).
   if (process.env.DSH_OFFICE_HEADLESS !== '1') win.once('ready-to-show', () => win.show())
+  win.once('closed', () => { win = null; browser?.stop() })
   win.webContents.on('console-message', (e) => {
     const lvl = e.level ?? 'info'
     if (lvl === 'error' || lvl === 'warning' || lvl === 2 || lvl === 3) log(`renderer ${lvl}: ${e.message} @${e.sourceId}:${e.lineNumber}`)
@@ -1260,6 +1313,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', async () => {
+  try { await browser?.stop() } catch {}
   try { await pool?.closeAll() } catch {}
   app.quit()
 })

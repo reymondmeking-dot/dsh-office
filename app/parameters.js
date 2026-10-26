@@ -108,10 +108,28 @@
       limitedByOutput: m.contextWindow - m.maxTokens - c.headroomTokens < m.contextWindow * c.thresholdRatio,
     }
   }
+  const DEFAULT_BROWSER = Object.freeze({ searchEngine: 'bing', searchTemplate: 'https://www.bing.com/search?q={q}', allowPrivate: false, blockedDomains: [], maxPages: 20, maxTaskMs: 600000 })
+  function normalizeBrowser(raw = {}) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(M('浏览器设置必须是对象', 'Browser settings must be an object'))
+    const b = { ...DEFAULT_BROWSER, ...raw }
+    if (!['bing', 'duckduckgo', 'google', 'custom'].includes(b.searchEngine)) throw new Error(M('未知搜索引擎', 'Unknown search engine'))
+    if (typeof b.allowPrivate !== 'boolean') throw new Error(M('内网访问开关必须是布尔值', 'Private network access must be true or false'))
+    if (typeof b.searchTemplate !== 'string' || !b.searchTemplate.includes('{q}') || !/^https?:\/\//i.test(b.searchTemplate)) throw new Error(M('搜索模板需要 HTTP(S) 地址及 {q}', 'Search template needs an HTTP(S) URL and {q}'))
+    try { const u = new URL(b.searchTemplate.replace('{q}', 'test')); if (u.username || u.password) throw new Error() } catch { throw new Error(M('搜索模板无效', 'Invalid search template')) }
+    if (!Array.isArray(b.blockedDomains) || b.blockedDomains.some(d => typeof d !== 'string' || !/^(?:\*\.)?[a-z0-9.-]+$/i.test(d))) throw new Error(M('黑名单请逐行填写域名', 'Enter one domain per blacklist line'))
+    b.blockedDomains = [...new Set(b.blockedDomains.map(d => d.toLowerCase().replace(/^\*\./, '')))]
+    integer(b.maxPages, M('任务页面上限', 'Task page limit')); integer(b.maxTaskMs, M('任务时间上限', 'Task time limit'))
+    if (b.maxPages > 100 || b.maxTaskMs < 1000 || b.maxTaskMs > 3600000) throw new Error(M('浏览限制应为 1–100 页，1 秒–60 分钟', 'Browser limits must be 1–100 pages and 1 second–60 minutes'))
+    return b
+  }
   function validateSettings(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(M('设置必须是对象', 'Settings must be an object'))
     if (raw.models !== undefined && !Array.isArray(raw.models)) throw new Error(M('模型列表必须是数组', 'The model list must be an array'))
-    const result = { ...raw, compaction: normalizeCompaction(raw.compaction), models: (raw.models || []).map(validateModel) }
+    const result = { ...raw, browser: normalizeBrowser(raw.browser), compaction: normalizeCompaction(raw.compaction), models: (raw.models || []).map(validateModel) }
+    if (raw.cliResources !== undefined) {
+      if (!raw.cliResources || typeof raw.cliResources !== 'object' || Array.isArray(raw.cliResources) || Object.entries(raw.cliResources).some(([k,v]) => !['github','taptap'].includes(k) || typeof v !== 'boolean')) throw new Error(M('CLI 授权必须是有效的资源开关', 'CLI grants must contain valid resource switches'))
+      result.cliResources = { ...raw.cliResources }
+    }
     const c = result.compaction
     const summaryModel = c.summarizationProvider && result.models.find(m => m.provider === c.summarizationProvider && m.model === c.summarizationModel)
     if (c.summarizationProvider && !summaryModel) throw new Error(M('摘要模型必须选用已配置的服务商和模型', 'The summary model must be a configured provider and model'))
@@ -228,5 +246,5 @@
     }
     return validateSettings(next)
   }
-  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert, msg: M })
+  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, DEFAULT_BROWSER, normalizeBrowser, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert, msg: M })
 })

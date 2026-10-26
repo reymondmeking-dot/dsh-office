@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root 'dist\DSH Office'
 $ver = '39.8.5'
+$appVersion = (Get-Content -LiteralPath (Join-Path $root 'app\package.json') -Raw | ConvertFrom-Json).version
 $zip = Join-Path $env:LOCALAPPDATA "electron\Cache\electron-v$ver-win32-x64.zip"
 if (-not (Test-Path $zip)) {
   $mirror = if ($env:ELECTRON_MIRROR) { $env:ELECTRON_MIRROR.TrimEnd('/') } else { 'https://github.com/electron/electron/releases/download' }
@@ -32,7 +33,7 @@ if (Test-Path (Join-Path $dist 'electron.exe')) {
 }
 $rcedit = 'C:\Users\Administrator\AppData\Local\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0\rcedit-x64.exe'
 if (Test-Path $rcedit) {
-  & $rcedit $exe --set-icon (Join-Path $root 'app\icon.ico') --set-version-string FileDescription 'DSH Office' --set-version-string ProductName 'DSH Office' --set-file-version 1.0.0 --set-product-version 1.0.0
+  & $rcedit $exe --set-icon (Join-Path $root 'app\icon.ico') --set-version-string FileDescription 'DSH Office' --set-version-string ProductName 'DSH Office' --set-file-version $appVersion --set-product-version $appVersion
 }
 
 $desktop = [Environment]::GetFolderPath('Desktop')

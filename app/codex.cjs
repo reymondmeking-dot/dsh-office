@@ -102,9 +102,10 @@ function configFast() {
 }
 
 class CodexRuntime {
-  constructor(pool, key, model, effort) {
+  constructor(pool, key, model, effort, browserContext) {
     this.pool = pool; this.key = key; this.model = model; this.effort = effort
-    this.threads = new Map() // office sessionId -> codex thread id
+    this.browserContext = browserContext
+    this.threads = pool.codexThreads || new Map() // model + office sessionId -> codex thread id
     this.children = new Set(); this.dead = false
     this.ready = Promise.resolve()
   }
@@ -122,7 +123,8 @@ class CodexRuntime {
     // Fast mode = Codex's priority service tier. Office's own switch wins; otherwise follow the user's Codex config.
     if ((settings.codexFast ?? configFast())) a.push('-c', 'service_tier="priority"')
     // Office MCP servers (Settings → Extensions) mount per run; the user's own Codex config is ignored.
-    a.push(...require('./extensions.cjs').codexMcpArgs(this.pool.ext?.mcpServers || [], settings.workspace))
+    const live = (this.pool.ext?.mcpServers || []).filter(s => !['office-browser', 'office-cli'].includes(s.source) || this.browserContext)
+    a.push(...require('./extensions.cjs').codexMcpArgs(live, this.browserContext?.projectDir || settings.workspace))
     if (resumeId) a.push(resumeId)
     a.push('-') // prompt on stdin: no quoting problems, no length limit
     return a
@@ -134,8 +136,10 @@ class CodexRuntime {
     if (!launch) return Promise.reject(new Error(require('./renderer/i18n.js').t('err.codexMissing')))
     fs.mkdirSync(settings.workspace, { recursive: true })
     return new Promise((resolve, reject) => {
-      const resumeId = this.threads.get(sessionId)
-      const proc = spawn(launch.cmd, [...launch.prefix, ...this.args(resumeId)], { cwd: settings.workspace, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      const threadKey = `${this.model.key}|${sessionId}`
+      const resumeId = this.threads.get(threadKey)
+      const env = require('./runtime.cjs').browserEnv(cleanEnv(), this.browserContext)
+      const proc = spawn(launch.cmd, [...launch.prefix, ...this.args(resumeId)], { cwd: this.browserContext?.projectDir || settings.workspace, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
       this.children.add(proc)
       let buf = '', last = '', failed = '', done = false, tail = ''
       const emit = ev => { try { onEvent?.(ev) } catch {} }
@@ -154,7 +158,7 @@ class CodexRuntime {
       const line = l => {
         if (!l.trim()) return
         let m; try { m = JSON.parse(l) } catch { tail = (tail + '\n' + l).slice(-1500); return }
-        if (m.type === 'thread.started' && m.thread_id) this.threads.set(sessionId, m.thread_id)
+        if (m.type === 'thread.started' && m.thread_id) this.threads.set(threadKey, m.thread_id)
         else if (m.type === 'turn.started') emit({ type: 'step/start' })
         else if (m.type === 'item.started') item(m.item)
         else if (m.type === 'item.completed' && m.item?.type === 'agent_message' && m.item.text) { last = m.item.text; emit({ type: 'assistant/attempt' }) }

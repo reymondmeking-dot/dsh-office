@@ -1012,6 +1012,7 @@
     if (!text) return ''
     const L = lang || current
     if (L !== 'en') return text
+    if (text === '项目已创建') return 'Project ready'
     const key = PHASE_ZH_TO_KEY[text]
     if (key) return PHASE_EN[key]
     let m = /^HR 招到 (\d+) 人$/.exec(text)

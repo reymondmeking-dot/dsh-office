@@ -29,7 +29,12 @@ function readPlugin(dir, builtin) {
   try {
     const id = String(m.id || base.id)
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id)) throw new Error(`bad plugin id: ${id}`)
-    const mcpServers = (m.mcpServers || []).map(s => P.normalizeMcpServer({ enabled: true, ...s }))
+    // A plugin may reference its own shipped scripts without depending on its
+    // installation path. Environment references remain references, not secrets.
+    const local = value => String(value).replaceAll('${pluginDir}', dir)
+    const mcpServers = (m.mcpServers || []).map(s => P.normalizeMcpServer({ enabled: true, ...s,
+      ...(s.args ? { args: s.args.map(local) } : {}), ...(s.cwd ? { cwd: local(s.cwd) } : {}),
+    }))
     const experts = (m.experts || []).map(e => P.normalizeExpert(e))
     const sd = m.skills ? path.resolve(dir, String(m.skills)) : path.join(dir, 'skills')
     const skillsDir = sd.startsWith(dir) && fs.existsSync(sd) ? sd : ''
@@ -250,7 +255,11 @@ function codexMcpArgs(servers, cwd) {
     const k = `mcp_servers.${s.name}`
     if (s.transport === 'stdio') {
       a.push('-c', `${k}.command=${t(expandEnv(s.command))}`, '-c', `${k}.args=[${s.args.map(x => t(expandEnv(x))).join(', ')}]`)
-      if (Object.keys(s.env).length) a.push('-c', `${k}.env=${table(s.env)}`)
+      // The built-in bridge capability lives only in the child environment,
+      // never in command arguments, renderer settings or the model context.
+      if (['office-browser', 'office-cli'].includes(s.source) && s.source === s.name) {
+        a.push('-c', `${k}.env_vars=[${Object.keys(s.env).map(t).join(', ')}]`)
+      } else if (Object.keys(s.env).length) a.push('-c', `${k}.env=${table(s.env)}`)
       a.push('-c', `${k}.cwd=${t(expandEnv(s.cwd || cwd))}`)
     } else {
       a.push('-c', `${k}.url=${t(expandEnv(s.url))}`)

@@ -6,6 +6,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const net = require('node:net')
 const os = require('node:os')
+const crypto = require('node:crypto')
 const parameters = require('./parameters.js')
 const { CodexRuntime } = require('./codex.cjs')
 const extensions = require('./extensions.cjs')
@@ -17,6 +18,7 @@ const extensions = require('./extensions.cjs')
 function extOf(settings, { stage = false } = {}) {
   const plugins = extensions.loadPlugins(process.env.DSH_OFFICE_PLUGIN_DIR || '')
   const ext = extensions.resolve(settings, plugins, extensions.listSkills(process.env.DSH_OFFICE_SKILL_DIR || ''))
+  for (const s of ext.mcpServers) if (['office-browser', 'office-cli'].includes(s.source) && s.source === s.name) s.command = findNode(settings.nodePath)
   ext.skillDirs = []
   if (stage) {
     try { const root = extensions.stageSkills(ext.skills, settings.workspace); if (root) ext.skillDirs.push(root) } catch {}
@@ -144,8 +146,9 @@ ${providers}` : ''}${compaction}`)
 }
 
 class Runtime {
-  constructor(pool, key, model, rush, effort) {
+  constructor(pool, key, model, rush, effort, browserContext) {
     this.pool = pool; this.key = key; this.model = model; this.rush = rush; this.effort = effort
+    this.browserContext = browserContext
     this.nextId = 0; this.pending = new Map(); this.watchers = new Map(); this.buf = ''
     this.stderrTail = ''
     this.ready = this.start()
@@ -158,6 +161,7 @@ class Runtime {
     const env = { ...process.env }
     delete env.ELECTRON_RUN_AS_NODE
     delete env.GLOBAL_AGENT_HTTP_PROXY; delete env.GLOBAL_AGENT_HTTPS_PROXY
+    browserEnv(env, this.browserContext)
     env.DSH_PERMISSION_MODE = settings.permissionMode || 'workspace-write'
     if (this.rush) env.DSH_OFFICE_RUSH = '1'
     if (settings.proxyPort && await portOpen(settings.proxyPort)) {
@@ -165,7 +169,16 @@ class Runtime {
       env.NO_PROXY = 'localhost,127.0.0.1,::1,deepseek.com'
     }
     fs.mkdirSync(settings.workspace, { recursive: true })
-    this.proc = spawn(this.pool.node, [bin, '--profile', 'office', '--patch', this.pool.patchPath], {
+    // MCP clients are runtime-scoped in DSH, so employee sessions get their own
+    // runtime and trusted environment. Warm runtimes omit the browser bridge.
+    const live = (this.pool.ext.mcpServers || []).filter(s => !['office-browser', 'office-cli'].includes(s.source) || this.browserContext)
+    this.patchPath = this.browserContext
+      ? path.join(path.dirname(this.pool.patchPath), `office.session.${crypto.createHash('sha256').update(this.key).digest('hex').slice(0, 20)}.patch.yml`)
+      : this.pool.patchPath
+    const compaction = '- id: compaction-basic\n  name: "@deepseek-ai/dsh-compaction-basic"\n  config:\n'
+      + Object.entries(parameters.normalizeCompaction(settings.compaction)).map(([key, value]) => `    ${key}: ${JSON.stringify(value)}\n`).join('')
+    if (this.browserContext) fs.writeFileSync(this.patchPath, compaction + extensions.dshSkillPatch(this.pool.ext.skillDirs || []) + extensions.dshMcpPatch(live, this.browserContext.projectDir))
+    this.proc = spawn(this.pool.node, [bin, '--profile', 'office', '--patch', this.patchPath], {
       cwd: dshRoot, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     })
     this.proc.stdout.setEncoding('utf8')
@@ -176,7 +189,7 @@ class Runtime {
     this.proc.on('error', err => this.onExit(String(err)))
     const modelId = (this.rush && this.model.fastModel) ? this.model.fastModel : this.model.model
     await this.request('initialize', {
-      cwd: settings.workspace, provider: this.model.provider, model: modelId,
+      cwd: this.browserContext?.projectDir || settings.workspace, provider: this.model.provider, model: modelId,
       ...(this.effort ? { reasoningEffort: this.effort } : {}),
     })
     this.pool.log(`runtime ${this.key} ready`)
@@ -258,34 +271,67 @@ class Runtime {
     try { await Promise.race([this.request('shutdown', {}), new Promise(r => setTimeout(r, 1500))]) } catch {}
     try { this.proc.stdin.end() } catch {}
     setTimeout(() => { try { this.proc.kill() } catch {} }, 1500)
+    if (this.browserContext && this.patchPath) { try { fs.unlinkSync(this.patchPath) } catch {} }
   }
+}
+
+/** Trusted session metadata is injected by main, never supplied by a tool call. */
+function browserEnv(env, context) {
+  for (const key of ['CONTEXT', 'PROJECT', 'OWNER']) delete env[`DSH_OFFICE_BROWSER_${key}`]
+  if (context) {
+    env.DSH_OFFICE_BROWSER_CONTEXT = String(context.id)
+    env.DSH_OFFICE_BROWSER_PROJECT = path.resolve(context.projectDir)
+    env.DSH_OFFICE_BROWSER_OWNER = String(context.owner || context.id)
+  }
+  return env
+}
+
+async function releaseBrowser(contextId) {
+  if (!process.env.DSH_OFFICE_BROWSER_URL || !process.env.DSH_OFFICE_BROWSER_TOKEN) return
+  try {
+    await fetch(new URL('/release', process.env.DSH_OFFICE_BROWSER_URL), {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.DSH_OFFICE_BROWSER_TOKEN}` },
+      body: JSON.stringify({ contextId }), signal: AbortSignal.timeout(2000),
+    })
+  } catch {}
 }
 
 class RuntimePool {
   constructor(settings, log = () => {}) {
     this.settings = settings; this.log = log; this.runtimes = new Map()
+    this.codexThreads = new Map()
     this.node = findNode(settings.nodePath)
-    this.ext = extOf(settings, { stage: true }); this.patchPath = writeProfile(settings, this.ext)
+    this.ext = extOf(settings, { stage: true }); this.patchPath = writeProfile(settings, { ...this.ext, mcpServers: this.ext.mcpServers.filter(s => !['office-browser', 'office-cli'].includes(s.source)) })
   }
   configure(settings) {
     this.settings = settings
     this.node = findNode(settings.nodePath)
-    this.ext = extOf(settings, { stage: true }); this.patchPath = writeProfile(settings, this.ext)
+    this.ext = extOf(settings, { stage: true }); this.patchPath = writeProfile(settings, { ...this.ext, mcpServers: this.ext.mcpServers.filter(s => !['office-browser', 'office-cli'].includes(s.source)) })
     return this.closeAll()
   }
-  get(modelKey, rush, effort) {
+  get(modelKey, rush, effort, browserContext) {
     const model = this.settings.models.find(m => m.key === modelKey) || this.settings.models[0]
     if (!model) throw new Error(require('./renderer/i18n.js').t('err.noModelShort'))
-    const key = `${model.key}|${effort || '-'}${rush ? '|rush' : ''}`
+    const key = `${model.key}|${effort || '-'}${rush ? '|rush' : ''}${browserContext ? '|session:' + browserContext.id : ''}`
     let rt = this.runtimes.get(key)
     if (!rt) {
       // Codex CLI models run through `codex exec`, not a DSH subprocess.
-      rt = model.engine === 'codex' ? new CodexRuntime(this, key, model, effort) : new Runtime(this, key, model, rush, effort)
+      rt = model.engine === 'codex' ? new CodexRuntime(this, key, model, effort, browserContext) : new Runtime(this, key, model, rush, effort, browserContext)
       this.runtimes.set(key, rt); rt.ready.catch(() => {})
     }
     return rt
   }
-  async closeAll() { await Promise.all([...this.runtimes.values()].map(r => r.close())); this.runtimes.clear() }
+  async releaseSession(sessionId) {
+    const contexts = [...this.runtimes.entries()].filter(([, r]) => r.browserContext?.id === sessionId)
+    for (const [key] of contexts) this.runtimes.delete(key)
+    await Promise.all(contexts.map(([, r]) => r.close()))
+    await releaseBrowser(sessionId)
+  }
+  async closeAll() {
+    const values = [...this.runtimes.values()]; this.runtimes.clear()
+    await Promise.all(values.map(r => r.close()))
+    await Promise.all([...new Set(values.map(r => r.browserContext?.id).filter(Boolean))].map(releaseBrowser))
+  }
 }
 
-module.exports = { RuntimePool, writeProfile, findNode, extOf }
+module.exports = { RuntimePool, writeProfile, findNode, extOf, browserEnv }

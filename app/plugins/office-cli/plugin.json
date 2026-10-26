@@ -1,0 +1,19 @@
+{
+  "id": "office-cli",
+  "name": { "zh": "本机 CLI 资源", "en": "Local CLI resources" },
+  "description": { "zh": "在设置中勾选并确认后，员工可复用 GitHub CLI 和 TapTap CLI 的现有登录会话执行列表内的只读命令，不读取或复制登录密钥。", "en": "After selection and confirmation in Settings, employees can reuse existing GitHub CLI and TapTap CLI sessions for listed read-only commands. Login keys are never read or copied." },
+  "version": "1.0.0", "author": "DSH Office", "enabledByDefault": true,
+  "mcpServers": [{
+    "name": "office-cli", "transport": "stdio", "command": "node",
+    "args": ["${pluginDir}/server.cjs"],
+    "env": {
+      "DSH_OFFICE_BROWSER_URL": "${DSH_OFFICE_BROWSER_URL}",
+      "DSH_OFFICE_BROWSER_TOKEN": "${DSH_OFFICE_BROWSER_TOKEN}",
+      "DSH_OFFICE_BROWSER_CONTEXT": "${DSH_OFFICE_BROWSER_CONTEXT}",
+      "DSH_OFFICE_BROWSER_PROJECT": "${DSH_OFFICE_BROWSER_PROJECT}",
+      "DSH_OFFICE_BROWSER_OWNER": "${DSH_OFFICE_BROWSER_OWNER}"
+    },
+    "description": "Use explicitly authorized local CLI sessions for bounded read-only GitHub and TapTap operations. No auth, token, write, shell or arbitrary file access.",
+    "timeoutMs": 60000
+  }]
+}

@@ -43,12 +43,12 @@ test('built-in plugins load; resolve applies user-first precedence and per-serve
   assert.ok(experts.experts.length >= 8 && experts.skills.length >= 2)
   // defaults: experts plugin on, MCP starter off
   let r = ext.resolve({}, plugins)
-  assert.equal(r.mcpServers.length, 0); assert.ok(r.experts.some(e => e.id === 'researcher')); assert.equal(r.skills.length, 2)
+  assert.deepEqual(r.mcpServers.map(s => s.name), ['office-browser', 'office-cli']); assert.ok(r.experts.some(e => e.id === 'researcher')); assert.equal(r.skills.length, 2)
   assert.deepEqual(r.experts.find(e => e.id === 'researcher').skillset, ['office-report-writing', 'office-self-check'])
   assert.ok(r.skills.every(s => s.description.length > 20))
   r = ext.resolve({ plugins: { 'mcp-starter': true, 'office-experts': false }, pluginMcp: { 'mcp-starter/thinking': false },
     mcpServers: [{ name: 'fetch', command: 'mine' }], experts: [{ id: 'mine', title: 'Mine', prompt: 'p' }] }, plugins)
-  assert.deepEqual(r.mcpServers.map(s => `${s.name}@${s.source}`), ['fetch@user', 'memory@mcp-starter'])
+  assert.deepEqual(r.mcpServers.map(s => `${s.name}@${s.source}`), ['fetch@user', 'memory@mcp-starter', 'office-browser@office-browser', 'office-cli@office-cli'])
   assert.ok(r.skipped.some(x => x.name === 'fetch' && x.source === 'mcp-starter'))
   assert.deepEqual(r.experts.map(e => e.id), ['mine']); assert.equal(r.skills.length, 0)
 })

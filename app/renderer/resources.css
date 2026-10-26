@@ -1,0 +1,18 @@
+.cli-resource { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.sheet label.cli-resource-label { display: flex; align-items: center; flex-direction: row; gap: 12px; cursor: pointer; }
+.cli-resource-label input { flex: none; }
+.cli-resource-label strong,.cli-resource-label small { display:block; }
+.cli-resource-label strong { font-size: var(--text-body); }
+.cli-resource-label small { color:var(--sub); font-size:var(--text-sm); margin-top:3px; }
+.cli-resource details { margin:8px 0 0 28px; font-size:var(--text-sm); color:var(--sub); }
+.cli-resource code { display:block; margin-top:8px; white-space:normal; overflow-wrap:anywhere; line-height:1.7; }
+.about-sheet { width:min(540px,calc(100vw - 48px)); }
+.about-content { padding:20px 28px 28px; }
+.about-version { font-size:30px; font-weight:650; font-variant-numeric:tabular-nums; }
+.about-content p { line-height:1.7; color:var(--sub); }
+.about-links { display:flex; flex-direction:column; align-items:flex-start; gap:14px; margin:22px 0; }
+.about-links a { color:var(--blue); text-decoration:underline; }
+.chat-context-bar { display:flex; align-items:center; gap:8px; padding:8px 20px; border-bottom:1px solid var(--line); background:var(--surface-muted); flex-wrap:wrap; }
+.chat-context-bar select { max-width:260px; }
+#chat-location { color:var(--sub); font-size:var(--text-sm); flex:1; min-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.task-location { padding:10px 12px; background:var(--surface-muted); border-radius:var(--radius-control); font-size:var(--text-sm); overflow-wrap:anywhere; user-select:text; }

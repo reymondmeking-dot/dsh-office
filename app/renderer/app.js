@@ -152,6 +152,7 @@
     $('#status-text').textContent = cur
       ? t('status.busy', { title: cur.title, phase: tp(cur.phase) }) + (queued ? t('status.queued', { n: queued }) : '')
       : t('status.idle')
+    $('#status-pill').title = $('#status-text').textContent
   }
   setStatus()
 
@@ -470,10 +471,24 @@
   })
 
   // ---------- new task ----------
+  let taskLocation = null, taskPlanSerial = 0
+  async function updateTaskLocation() {
+    const serial = ++taskPlanSerial; taskLocation = null; $('#task-location-confirm').checked = false
+    $('#task-location').textContent = t('task.planning')
+    try {
+      const plan = await api.taskLocation({ title: $('#task-title').value.trim() || 'task', projectId: $('#task-project').value || null })
+      if (serial !== taskPlanSerial) return
+      taskLocation = plan; $('#task-location').textContent = plan.dir
+    } catch (e) { $('#task-location').textContent = errText(e) }
+  }
+  $('#task-title').addEventListener('input', updateTaskLocation)
+  $('#task-project').onchange = updateTaskLocation
   $('#btn-new').onclick = () => openTaskSheet()
   function openTaskSheet() {
     if (!$('#task-modal').classList.contains('hidden')) return
     $('#task-modal').classList.remove('hidden'); renderAtts(); $('#task-rush').checked = O.isRush()
+    $('#task-project').innerHTML = `<option value="">${esc(t('task.standalone'))}</option>` + projects.filter(p => p.kind === 'workspace').map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('')
+    updateTaskLocation()
     const sel = $('#task-continue'); sel.innerHTML = `<option value="">${t('task.fresh')}</option>`
     for (const p of projects.filter(p => p.status === 'done' || p.status === 'failed' || p.status === 'integrating')) {
       const o = document.createElement('option'); o.value = p.id
@@ -488,10 +503,11 @@
   $('#task-submit').onclick = async () => {
     const title = $('#task-title').value.trim()
     if (!title) { $('#task-title').focus(); return toast(t('task.needTitle')) }
+    if (!taskLocation || !$('#task-location-confirm').checked) return toast(t('task.needLocation'))
     const btn = $('#task-submit'); if (btn.disabled) return
     btn.disabled = true; btn.textContent = atts.length ? t('task.copying') : t('task.submitting')
     let p
-    try { p = await api.submit({ title, brief: $('#task-brief').value.trim(), rush: $('#task-rush').checked, continueOf: $('#task-continue').value || null, attachments: atts.map(a => a.path) }) } finally { btn.disabled = false; btn.textContent = t('task.submit') }
+    try { p = await api.submit({ title, brief: $('#task-brief').value.trim(), rush: $('#task-rush').checked, continueOf: $('#task-continue').value || null, projectId: $('#task-project').value || null, location: taskLocation, locationConfirmed: true, attachments: atts.map(a => a.path) }) } finally { btn.disabled = false; btn.textContent = t('task.submit') }
     $('#task-modal').classList.add('hidden'); $('#task-title').value = ''; $('#task-brief').value = ''; atts = []; renderAtts()
     const bad = (p.attachments || []).filter(a => a.error); if (bad.length) toast(t('task.attFailToast', { n: bad.length, names: andJoin(bad.map(a => a.name)) }), 5000)
     if (p.status === 'queued' && projects.some(x => x.id !== p.id && !['done', 'failed', 'queued'].includes(x.status))) toast(t('task.queued'))
@@ -566,20 +582,7 @@
       ${p.summary ? `<h3>${t('archive.summary')}</h3>${renderMarkdown(p.summary)}` : ''}`
     for (const c of pv.querySelectorAll('.att-chip[data-open]')) if (c.dataset.open) { c.onclick = () => api.open(c.dataset.open); c.oncontextmenu = e => { e.preventDefault(); api.reveal(c.dataset.open) } }
   }
-  async function showFile(f) {
-    const pv = $('#bv-preview')
-    const ext = f.rel.split('.').pop().toLowerCase()
-    const actions = `<div class="pv-actions"><button class="pill-btn" id="pv-open">${t('file.open')}</button><button class="pill-btn" id="pv-reveal">${t('file.reveal')}</button></div>`
-    const bind = () => { $('#pv-open').onclick = () => api.open(f.path); $('#pv-reveal').onclick = () => api.reveal(f.path) }
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-      pv.innerHTML = `${actions}<p class="hint">${t('file.imageHint')}</p>`; return bind()
-    }
-    let r
-    try { r = await api.readFile(f.path) } catch (e) { pv.innerHTML = `${actions}<p>${t('file.readFail', { error: esc(e.message) })}</p>`; return bind() }
-    if (r.binary || r.tooLarge) { pv.innerHTML = `${actions}<p class="hint">${t('file.binaryHint', { kind: r.binary ? t('file.binary') : t('file.tooLarge') })}</p>`; return bind() }
-    pv.innerHTML = actions + (ext === 'md' || ext === 'markdown' ? renderMarkdown(r.text) : `<pre><code>${esc(r.text)}</code></pre>`)
-    bind()
-  }
+  async function showFile(f) { try { await window.OfficeBrowser.openFile(f.path) } catch {} }
   $('#bv-back').onclick = () => { $('#book-view').classList.add('hidden'); $('#bookcase').classList.remove('hidden'); renderBookcase() }
 
   // ---------- project chat (talk to the CEO with context; click deliverables to read) ----------
@@ -603,7 +606,8 @@
   function fillChatProjects(list, sel) {
     $('#chat-proj').innerHTML = list.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? 'selected' : ''}>${p.status === 'failed' ? '✕ ' : '✓ '}${esc(p.title)}</option>`).join('')
   }
-  async function openChat(id) {
+  async function openChat(id, conversationId = 'default') {
+    projects = await api.projects(); O.setProjects(projects)
     const list = chatable()
     if (id && !list.some(p => p.id === id)) return toast(t('chat.notReady'), 3200)
     if (!list.length) return toast(projects.length ? t('chat.notReady') : t('chat.noProject'), 3200)
@@ -611,11 +615,11 @@
     $('#btn-chat').classList.remove('ping')
     $('#chat-modal').classList.remove('hidden')
     fillChatProjects(list, pid)
-    await loadChat(pid)
+    await loadChat(pid, conversationId)
     setTimeout(() => $('#chat-text').focus(), 60)
   }
-  async function loadChat(pid) {
-    const h = await api.chatHistory(pid); if (!h) return
+  async function loadChat(pid, conversationId = 'default') {
+    const h = await api.chatHistory(pid, conversationId); if (!h) return
     chat = { ...h, sel: null }
     $('#chat-side-view').classList.add('hidden'); $('#chat-side-list').classList.remove('hidden')
     renderChat()
@@ -624,6 +628,10 @@
   function renderChat() {
     if (!chat) return
     $('#chat-title').textContent = `💬 ${t('chat.with', { name: ceoName() })}`
+    $('#chat-conversation').innerHTML = (chat.conversations || []).map(c => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join('')
+    $('#chat-conversation').value = chat.conversationId || 'default'
+    $('#chat-location').textContent = chat.dir || ''; $('#chat-location').title = chat.dir || ''
+    $('#chat-references').textContent = `${t('chat.references')}${chat.references?.length ? ' · ' + chat.references.length : ''}`
     renderChatLog(true); renderChatSide()
     const busy = chatSending.has(chat.id) || chat.busy
     $('#chat-send').disabled = busy; $('#chat-text').disabled = false
@@ -673,32 +681,12 @@
   }
   async function previewChatFile(f) {
     if (!chat || !f) return
-    chat.sel = f
-    $('#chat-side-list').classList.add('hidden'); $('#chat-side-view').classList.remove('hidden')
-    $('#cp-name').textContent = `${fileIco(f.rel)} ${f.rel}`
-    $('#cp-open').onclick = () => api.open(f.path); $('#cp-reveal').onclick = () => api.reveal(f.path)
-    const body = $('#cp-body'); body.scrollTop = 0
-    const ext = f.rel.split('.').pop().toLowerCase()
-    const mine = chat.id
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
-      body.innerHTML = '…'
-      try {
-        const r = await api.readImage(f.path)
-        if (chat?.id !== mine || chat.sel !== f) return
-        body.innerHTML = r.dataUrl ? `<img class="cp-img" src="${r.dataUrl}" alt="${esc(f.rel)}">` : `<p class="hint">${t('file.binaryHint', { kind: r.tooLarge ? t('file.tooLarge') : t('file.binary') })}</p>`
-      } catch (e) { body.innerHTML = `<p>${t('file.readFail', { error: esc(errText(e)) })}</p>` }
-      return
-    }
-    let r
-    try { r = await api.readFile(f.path) } catch (e) { body.innerHTML = `<p>${t('file.readFail', { error: esc(errText(e)) })}</p>`; return }
-    if (chat?.id !== mine || chat.sel !== f) return
-    if (r.binary || r.tooLarge) { body.innerHTML = `<p class="hint">${t('file.binaryHint', { kind: r.binary ? t('file.binary') : t('file.tooLarge') })}</p>`; return }
-    if (ext === 'md' || ext === 'markdown') { body.innerHTML = renderMarkdown(r.text); bindFileRefs(body) }
-    else body.innerHTML = `<pre><code>${esc(r.text)}</code></pre>`
+    try { await window.OfficeBrowser.openFile(f.path) } catch {}
   }
   async function sendChat() {
     if (!chat) return
     const pid = chat.id
+    const cid = chat.conversationId || 'default'
     const text = $('#chat-text').value.trim()
     if (!text || chatSending.has(pid)) return
     chatSending.add(pid)
@@ -706,21 +694,26 @@
     chat.messages.push({ role: 'user', text, at: Date.now() }); renderChatLog(true)
     setChatStatus(t('chat.thinking', { name: ceoName() }))
     try {
-      const r = await api.chatSend(pid, text)
-      if (chat?.id === pid) {
+      const r = await api.chatSend(pid, text, cid)
+      if (chat?.id === pid && (chat.conversationId || 'default') === cid) {
         chat.messages.push(r.message); chat.products = r.products
         const sel = chat.sel && flatProducts(r.products).find(f => f.rel === chat.sel.rel)
         renderChatLog(true); renderChatSide()
         if (sel && r.message.files?.some(f => f.changed && f.rel === sel.rel) && !$('#chat-side-view').classList.contains('hidden')) previewChatFile(sel)
       }
     } catch (e) {
-      if (chat?.id === pid) { chat.messages.push({ role: 'ceo', text: t('chat.sendFail', { error: errText(e) }), at: Date.now(), error: true }); renderChatLog(true) }
+      if (chat?.id === pid && (chat.conversationId || 'default') === cid) { chat.messages.push({ role: 'ceo', text: t('chat.sendFail', { error: errText(e) }), at: Date.now(), error: true }); renderChatLog(true) }
     } finally {
       chatSending.delete(pid)
       if (chat?.id === pid) { setChatStatus(''); $('#chat-send').disabled = false; $('#chat-text').focus() }
     }
   }
   $('#btn-chat').onclick = () => openChat()
+  $('#chat-conversation').onchange = () => { if (chat) loadChat(chat.id, $('#chat-conversation').value) }
+  $('#chat-new-conversation').onclick = () => { if (chat) window.OfficeProjects?.newConversation(chat.id) }
+  $('#chat-references').onclick = () => { if (chat) window.OfficeProjects?.references(chat.id, chat.conversationId || 'default') }
+  document.addEventListener('office:open-project-chat', e => openChat(e.detail.id, e.detail.conversationId || 'default').catch(err => toast(errText(err))))
+  document.addEventListener('office:project-references-updated', e => { if (chat?.id === e.detail.id) loadChat(chat.id, chat.conversationId || 'default') })
   $('#bv-chat').onclick = () => { if (bookId) { $('#archive-modal').classList.add('hidden'); openChat(bookId) } }
   $('#chat-proj').onchange = e => loadChat(e.target.value)
   $('#chat-send').onclick = sendChat
@@ -736,6 +729,7 @@
   let pv = null
   const errText = e => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
   async function openSettings(focusHarness) {
+    document.dispatchEvent(new CustomEvent('office:settings', { detail: settings }))
     $('#settings-modal').classList.remove('hidden'); $('#set-msg').textContent = ''
     $('#set-workspace').value = settings.workspace
     $('#set-dsh').value = settings.dshRoot
@@ -1453,6 +1447,7 @@
       P.validateSettings({ ...settings, compaction })
       for (const [n, x] of Object.entries(harnessDirty)) await api.saveHarness(n, x)
       settings = await api.saveSettings({
+        browser: window.OfficeBrowser.readSettings(),
         workspace: $('#set-workspace').value.trim() || settings.workspace,
         dshRoot: $('#set-dsh').value.trim() || settings.dshRoot,
         proxyPort: Number($('#set-proxy').value) || 0,

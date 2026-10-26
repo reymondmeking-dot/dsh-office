@@ -1,0 +1,21 @@
+{
+  "id": "office-browser",
+  "name": { "zh": "办公室浏览器", "en": "Office browser" },
+  "description": { "zh": "复用 Electron 的无头浏览器：搜索、读取网页、DOM 操作、截图和工作区文件。每位员工使用独立会话；登录须由用户确认。", "en": "Headless browsing with Electron: search, readable pages, DOM actions, screenshots and workspace files. Each employee has an isolated session; saved logins require user confirmation." },
+  "version": "1.0.0",
+  "author": "DSH Office",
+  "enabledByDefault": true,
+  "mcpServers": [{
+    "name": "office-browser", "transport": "stdio", "command": "node",
+    "args": ["${pluginDir}/server.cjs"],
+    "env": {
+      "DSH_OFFICE_BROWSER_URL": "${DSH_OFFICE_BROWSER_URL}",
+      "DSH_OFFICE_BROWSER_TOKEN": "${DSH_OFFICE_BROWSER_TOKEN}",
+      "DSH_OFFICE_BROWSER_CONTEXT": "${DSH_OFFICE_BROWSER_CONTEXT}",
+      "DSH_OFFICE_BROWSER_PROJECT": "${DSH_OFFICE_BROWSER_PROJECT}",
+      "DSH_OFFICE_BROWSER_OWNER": "${DSH_OFFICE_BROWSER_OWNER}"
+    },
+    "description": "Search and browse in a hidden, isolated Electron session. Use browser_snapshot refs for actions; request saved login without seeing credentials.",
+    "timeoutMs": 90000
+  }]
+}
