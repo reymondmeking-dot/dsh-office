@@ -1,10 +1,10 @@
 # DSH Office 1.4.0 UI tour
 
-[MP4](dsh-office-1.4.0-demo.mp4) · [Looping GIF](dsh-office-1.4.0-preview.gif) · [File hashes](manifest.json)
+[MP4](dsh-office-1.4.0-demo.mp4) · [Looping GIF (highlight)](dsh-office-1.4.0-preview.gif) · [File hashes](manifest.json)
 
-18 秒无声导览：6 个真实界面截图各停留 3 秒，展示中文办公室、项目管理、独立对话、Markdown 文件预览、CLI 资源检测和英文办公室。它展示产品界面，不代表一次员工任务的连续录像。
+30 秒导览（1280×720，背景音乐与音效）：标题 → 办公室 → 项目管理 → 独立对话与跨项目引用 → 内置浏览器（真实打开的 IANA 公开页面）→ 密码管理 → Markdown 预览 → 技能 / MCP / 本机 CLI → 英文界面 → 结尾。画面全部是真实界面截图，叠加镜头推近、高亮框和中英字幕；它展示产品界面，不代表一次员工任务的连续录像。GIF 为其中 13 秒精华片段。
 
-An 18-second silent tour made from six real UI captures, each held for three seconds: Chinese office, projects, a separate conversation, Markdown preview, CLI detection, and English office. It presents the product UI rather than a continuous employee-task recording.
+A 30-second tour (1280×720, music and SFX): title, office, projects, a separate conversation with references, the built-in browser on a real public IANA page, the password vault, Markdown preview, skills / MCP / local CLI, English UI, end card. Every frame is a real UI capture with camera moves, highlights and bilingual captions; it presents the product UI rather than a continuous employee-task recording. The GIF is a 13-second highlight.
 
 项目、对话与文件使用隔离演示数据。CLI 登录状态由本机 CLI 只读检测；没有授权调用业务资源，也未展示凭据。捕获使用现有 Electron 应用的隐藏窗口、隔离的 `userData` / `DSH_HOME` / `CODEX_HOME` 和 CDP；没有额外浏览器下载。旧版配音宣传片仍单独保留在主 README 的折叠区。
 
