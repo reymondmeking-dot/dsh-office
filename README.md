@@ -5,12 +5,12 @@
     <img src="docs/demo/dsh-office-1.4.0-preview.gif" alt="DSH Office 1.4.0 界面演示 / UI tour" width="800" />
   </a>
   <br />
-  <b>▶ <a href="docs/demo/dsh-office-1.4.0-demo.mp4">观看 1.4.0 演示（30 秒，有背景音乐）/ Watch the 1.4.0 demo (30 seconds, with music)</a></b>
+  <b>▶ <a href="docs/demo/dsh-office-1.4.0-demo.mp4">Watch the 1.4.0 demo — English (39 s, narrated)</a> · <a href="docs/demo/dsh-office-1.4.0-demo-zh.mp4">观看中文版（45 秒，配音）</a></b>
 </p>
 
-> 画面均为 1.4.0 真实界面截图（隔离演示数据，无头捕获），加入镜头推近、高亮与中英字幕；浏览器页为真实打开的公开网页。这是功能导览，并非一次员工完整任务的连续录像。
+> 画面均为 1.4.0 真实界面截图（隔离演示数据，无头捕获），加入镜头推近、高亮、字幕、配音和配乐；浏览器页为真实打开的公开网页。这是功能导览，并非一次员工完整任务的连续录像。
 >
-> Every frame is a real 1.4.0 UI capture (isolated demo data, headless), with camera moves, highlights and bilingual captions; the browser shows a real public page. It is a feature tour, not a continuous recording of a complete employee task.
+> Every frame is a real 1.4.0 UI capture (isolated demo data, headless), with camera moves, highlights, captions, narration and music; the browser shows a real public page. It is a feature tour, not a continuous recording of a complete employee task.
 
 **像素办公室多 Agent 协作桌面应用** — 给 DeepSeek Harness (DSH) 套上一间会动的像素办公室：你给 CEO 派任务，CEO 定目标、HR 招人分工、员工并行干活、HR 审核返工、CEO 验收归档，全部在一间像素风办公室里实时上演。
 

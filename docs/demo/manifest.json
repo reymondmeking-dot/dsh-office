@@ -1,84 +1,96 @@
 {
-    "version":  "1.4.0",
-    "duration":  29.5,
-    "fps":  30,
-    "width":  1280,
-    "height":  720,
-    "audio":  true,
-    "fixture":  "Isolated illustrative project and conversations; no model task is executed. CLI authentication status is detected without exposing credentials or granting access.",
-    "capture":  "Real 1.4.0 UI captures (Electron 39.8.5, DSH_OFFICE_HEADLESS=1, isolated userData/DSH_HOME/CODEX_HOME, CDP at 1600x1000 DPR 1.5). Browser scene shows the real https://www.iana.org/help/example-domains page captured from the native WebContentsView and placed in its viewport. Camera moves, highlights, bilingual captions, BGM and SFX composed with HyperFrames 0.8.191; GIF is a 13-second highlight. Not a continuous task recording.",
-    "scenes":  [
-                   "Title",
-                   "Office",
-                   "Project manager",
-                   "Separate conversation with references",
-                   "Built-in browser (live public page)",
-                   "Password vault",
-                   "Markdown file preview",
-                   "Skills / MCP / local CLI",
-                   "English UI",
-                   "End card"
-               ],
-    "files":  [
-                  {
-                      "path":  "docs/demo/dsh-office-1.4.0-demo.mp4",
-                      "bytes":  3103496,
-                      "sha256":  "e626c8a8a892a5caf1ac909df4c9042c5b0fba69e0f17913283ef62400f07f47"
-                  },
-                  {
-                      "path":  "docs/demo/dsh-office-1.4.0-preview.gif",
-                      "bytes":  2703181,
-                      "sha256":  "c7e7776e91d6938aa7be35e83982d6de7f8d50eb2d4a70c37bd28b00dd92acdf"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-office-zh.jpg",
-                      "bytes":  138317,
-                      "sha256":  "531731e8642fea98e8b2eb3b1c92b87f4a52f32ccdb817c2ed62d41d61066b4c"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-projects-zh.jpg",
-                      "bytes":  64320,
-                      "sha256":  "df9006d9f96fa21a3dafce4d27ceb8587fa6c9f81e418bb87f755da28df7c96e"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-chat-zh.jpg",
-                      "bytes":  74755,
-                      "sha256":  "08277341686d176557b10df8aed034229d9287f1b26682a62e143c31b9a9a42c"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-files-zh.jpg",
-                      "bytes":  53767,
-                      "sha256":  "56e0a7cc1f2a5f73669a5d7b402dd50881f46375af54283dcb7682d0a95cf1a2"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-cli-zh.jpg",
-                      "bytes":  71365,
-                      "sha256":  "618d673d84ca62723b40102aac9b8c4699bb542ffb4dab31d8a9c76d22796d12"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-office-en.jpg",
-                      "bytes":  139451,
-                      "sha256":  "1486cd91689d2d190aa441189c4a43b43ddd5800e650158738afaa2fc0fe7146"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-projects-en.jpg",
-                      "bytes":  69342,
-                      "sha256":  "57f42432762afdafaee341dfb9e13743872441f0e202fc2af1e7446e21d2f19e"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-chat-en.jpg",
-                      "bytes":  76838,
-                      "sha256":  "2f0e88987734ffec2bac5cf6a1794421ef809a02692e44ecedde89b4a53f220d"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-files-en.jpg",
-                      "bytes":  53572,
-                      "sha256":  "ce448201be402d66446d105787b0d28f0064fcefd39bc123b7f1c52f2f270e79"
-                  },
-                  {
-                      "path":  "docs/images/v1.4.0-cli-en.jpg",
-                      "bytes":  77460,
-                      "sha256":  "4034f3ec6c3b630b49ac5c32f5c433097f63b9c363d8b0c16e925beacb0676a6"
-                  }
-              ]
+  "version": "1.4.0",
+  "duration": {
+    "en": 39,
+    "zh": 45
+  },
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "audio": true,
+  "fixture": "Isolated illustrative project and conversations; no model task is executed. CLI authentication status is detected without exposing credentials or granting access.",
+  "capture": "Real 1.4.0 UI captures (Electron 39.8.5, DSH_OFFICE_HEADLESS=1, isolated userData/DSH_HOME/CODEX_HOME, CDP at 1600x1000 DPR 1.5). Browser scene shows the real https://www.iana.org/help/example-domains page captured from the native WebContentsView and placed in its viewport. Composed with HyperFrames 0.8.191. Not a continuous task recording.",
+  "scenes": [
+    "Title",
+    "Office",
+    "Project manager",
+    "Cross-project references",
+    "Built-in browser (live public page)",
+    "Password vault",
+    "Markdown file preview",
+    "Skills / MCP / local CLI",
+    "End card"
+  ],
+  "files": [
+    {
+      "path": "docs/demo/dsh-office-1.4.0-demo.mp4",
+      "bytes": 3068741,
+      "sha256": "388c4fdd6a2f0765415c3c3236c69d09d27ef2d31b64343a02a1f7a993f63722"
+    },
+    {
+      "path": "docs/demo/dsh-office-1.4.0-demo-zh.mp4",
+      "bytes": 3407815,
+      "sha256": "8a4fead78051885dfdad52122a98164a4327b0dcaad0ba8affcf33c94bbb682c"
+    },
+    {
+      "path": "docs/demo/dsh-office-1.4.0-preview.gif",
+      "bytes": 3332913,
+      "sha256": "f5f0a8fdd54c9b006276600b8f4baee399cf7744fe3b8a19f0fba1dfb107acfa"
+    },
+    {
+      "path": "docs/images/v1.4.0-office-zh.jpg",
+      "bytes": 138317,
+      "sha256": "531731e8642fea98e8b2eb3b1c92b87f4a52f32ccdb817c2ed62d41d61066b4c"
+    },
+    {
+      "path": "docs/images/v1.4.0-projects-zh.jpg",
+      "bytes": 64320,
+      "sha256": "df9006d9f96fa21a3dafce4d27ceb8587fa6c9f81e418bb87f755da28df7c96e"
+    },
+    {
+      "path": "docs/images/v1.4.0-chat-zh.jpg",
+      "bytes": 74755,
+      "sha256": "08277341686d176557b10df8aed034229d9287f1b26682a62e143c31b9a9a42c"
+    },
+    {
+      "path": "docs/images/v1.4.0-files-zh.jpg",
+      "bytes": 53767,
+      "sha256": "56e0a7cc1f2a5f73669a5d7b402dd50881f46375af54283dcb7682d0a95cf1a2"
+    },
+    {
+      "path": "docs/images/v1.4.0-cli-zh.jpg",
+      "bytes": 71365,
+      "sha256": "618d673d84ca62723b40102aac9b8c4699bb542ffb4dab31d8a9c76d22796d12"
+    },
+    {
+      "path": "docs/images/v1.4.0-office-en.jpg",
+      "bytes": 139451,
+      "sha256": "1486cd91689d2d190aa441189c4a43b43ddd5800e650158738afaa2fc0fe7146"
+    },
+    {
+      "path": "docs/images/v1.4.0-projects-en.jpg",
+      "bytes": 69342,
+      "sha256": "57f42432762afdafaee341dfb9e13743872441f0e202fc2af1e7446e21d2f19e"
+    },
+    {
+      "path": "docs/images/v1.4.0-chat-en.jpg",
+      "bytes": 76838,
+      "sha256": "2f0e88987734ffec2bac5cf6a1794421ef809a02692e44ecedde89b4a53f220d"
+    },
+    {
+      "path": "docs/images/v1.4.0-files-en.jpg",
+      "bytes": 53572,
+      "sha256": "ce448201be402d66446d105787b0d28f0064fcefd39bc123b7f1c52f2f270e79"
+    },
+    {
+      "path": "docs/images/v1.4.0-cli-en.jpg",
+      "bytes": 77460,
+      "sha256": "4034f3ec6c3b630b49ac5c32f5c433097f63b9c363d8b0c16e925beacb0676a6"
+    }
+  ],
+  "audioSources": {
+    "narration": "Local Kokoro TTS via hyperframes tts (en: af_heart, zh: zf_xiaobei)",
+    "music": "Local MusicGen facebook/musicgen-stereo-medium instrumental, generated on this machine",
+    "sfx": "HyperFrames bundled SFX library"
+  }
 }
