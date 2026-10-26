@@ -17,3 +17,5 @@ node scripts/record-readme-demo.mjs
 ```
 
 Requires the built `dist/DSH Office/DSH Office.exe`, Node.js and FFmpeg. The script creates a new isolated working folder under `D:\AI\`, captures ten bilingual JPEGs for the main README, and writes the MP4, GIF and checksum manifest here. It does not run a model task or use the real DSH/Codex configuration homes.
+
+注意 / Note: 当前 MP4 / GIF 是在同一套隔离数据的新一轮无头截图上，用 HyperFrames 合成的（工程在本地，未提交）。上面的脚本只重新生成旧版纯截图导览和 README 截图；直接运行会覆盖这里的视频。 The current MP4 / GIF were composed with HyperFrames from a fresh headless capture of the same isolated fixture (local project, not committed). The script above regenerates the earlier plain screenshot tour and the README screenshots, and running it overwrites the video here.
