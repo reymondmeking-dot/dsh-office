@@ -1,51 +1,78 @@
 # DSH Office 1.4.0
 
 <p align="center">
-  <a href="https://github.com/reymondmeking-dot/dsh-office/releases/download/v1.2.1/dsh-office-promo.mp4">
-    <img src="docs/images/promo-preview.gif" alt="DSH Office 宣传片 / promo video" width="720" />
+  <a href="docs/demo/dsh-office-1.4.0-demo.mp4">
+    <img src="docs/demo/dsh-office-1.4.0-preview.gif" alt="DSH Office 1.4.0 界面演示 / UI tour" width="800" />
   </a>
   <br />
-  <b>▶ <a href="https://github.com/reymondmeking-dot/dsh-office/releases/download/v1.2.1/dsh-office-promo.mp4">观看 40 秒宣传片（带配音）/ Watch the 40-second promo (with sound)</a></b>
+  <b>▶ <a href="docs/demo/dsh-office-1.4.0-demo.mp4">观看 1.4.0 界面演示（18 秒，无声）/ Watch the 1.4.0 UI tour (18 seconds, silent)</a></b>
 </p>
+
+> 由 6 个真实 1.4.0 界面截图组成（每个 3 秒），使用隔离演示数据；这是无声界面导览，并非一次员工完整任务的连续录像。
+>
+> Built from six real 1.4.0 UI captures (3 seconds each) with isolated demo data. This is a silent UI tour, not a continuous recording of a complete employee task.
 
 **像素办公室多 Agent 协作桌面应用** — 给 DeepSeek Harness (DSH) 套上一间会动的像素办公室：你给 CEO 派任务，CEO 定目标、HR 招人分工、员工并行干活、HR 审核返工、CEO 验收归档，全部在一间像素风办公室里实时上演。
 
 A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; the CEO sets the goal, HR hires a team and schedules the work, employees execute in parallel with HR review/rework loops, and the CEO accepts and archives everything — acted out live in a pixel-art office.
 
+**1.4.0**：[项目与多对话](#项目多对话与成果引用--projects-conversations--references) · [浏览器与文件预览](#浏览器文件预览与本地密码--browser-file-previews--local-passwords) · [本机 CLI 资源](#本机-cli-资源--local-cli-resources)
+
+**1.4.0**: [Projects & conversations](#项目多对话与成果引用--projects-conversations--references) · [Browser & file previews](#浏览器文件预览与本地密码--browser-file-previews--local-passwords) · [Local CLI resources](#本机-cli-资源--local-cli-resources)
+
+<details>
+<summary>旧版宣传片 / Earlier promo（40 秒，带配音 / 40 seconds, with sound）</summary>
+
+<p align="center">
+  <a href="https://github.com/reymondmeking-dot/dsh-office/releases/download/v1.2.1/dsh-office-promo.mp4">
+    <img src="docs/images/promo-preview.gif" alt="旧版 DSH Office 宣传片 / Earlier DSH Office promo" width="720" />
+  </a>
+  <br />
+  <a href="https://github.com/reymondmeking-dot/dsh-office/releases/download/v1.2.1/dsh-office-promo.mp4">观看旧版宣传片 / Watch the earlier promo</a>
+</p>
+
+该视频展示较早版本的整体工作流程，界面与 1.4.0 有所不同。
+This video shows the overall workflow in an earlier version; its interface differs from 1.4.0.
+
+</details>
+
 ---
 
 ## 截图 / Screenshots
 
-**像素办公室：任务全流程实时上演 / The pixel office: the whole pipeline acted out live**
+**双层标题栏与像素办公室 / Two-level title bar & pixel office**
 
 | 中文 | English |
 |---|---|
-| ![中文办公室界面](docs/images/office-zh.jpg) | ![English office](docs/images/office-en.jpg) |
+| ![1.4.0 中文办公室界面](docs/images/v1.4.0-office-zh.jpg) | ![1.4.0 English office](docs/images/v1.4.0-office-en.jpg) |
 
-**项目对话：与 CEO 连续对话，点击成果直接查看 / Project chat: talk to the CEO, click a deliverable to read it**
-
-![项目对话窗口](docs/images/chat-zh.jpg)
-
-**新任务（可拖入附件）/ New task (drag in attachments)**
+**项目管理：保存位置、独立对话与成果引用 / Projects: save location, separate conversations & references**
 
 | 中文 | English |
 |---|---|
-| ![新建任务-中文](docs/images/task-zh.jpg) | ![New task - English](docs/images/task-en.jpg) |
+| ![1.4.0 项目管理](docs/images/v1.4.0-projects-zh.jpg) | ![1.4.0 project management](docs/images/v1.4.0-projects-en.jpg) |
 
-**设置：服务商、模型果子、思考强度 / Settings: providers, model fruits, thinking effort**
-
-| 中文 | English |
-|---|---|
-| ![设置-中文](docs/images/settings-zh.jpg) | ![Settings - English](docs/images/settings-en.jpg) |
-
-**服务商编辑：协议、Base URL、每模型输入/输出上限 / Provider editor: protocol, base URL, per-model token limits**
+**项目对话：切换上下文，直接查看成果 / Project chat: switch contexts & open deliverables**
 
 | 中文 | English |
 |---|---|
-| ![服务商编辑-中文](docs/images/provider-zh.jpg) | ![Provider editor - English](docs/images/provider-en.jpg) |
+| ![1.4.0 项目对话](docs/images/v1.4.0-chat-zh.jpg) | ![1.4.0 project conversation](docs/images/v1.4.0-chat-en.jpg) |
 
-> 截图使用演示配置（`api.example.com` 假数据），界面内不显示真实 API Key。
-> Screenshots use demo data (`api.example.com`); the UI never shows raw API keys.
+**文件查看器：在应用内阅读交付物 / File viewer: read deliverables inside the app**
+
+| 中文 | English |
+|---|---|
+| ![1.4.0 文件查看器](docs/images/v1.4.0-files-zh.jpg) | ![1.4.0 file viewer](docs/images/v1.4.0-files-en.jpg) |
+
+**本机 CLI：一键检测，勾选确认授权 / Local CLIs: detect, select & confirm access**
+
+| 中文 | English |
+|---|---|
+| ![1.4.0 CLI 资源授权](docs/images/v1.4.0-cli-zh.jpg) | ![1.4.0 CLI resource access](docs/images/v1.4.0-cli-en.jpg) |
+
+> 以上为 1.4.0 的真实界面截图，项目内容使用隔离演示数据。CLI 页仅做本机只读检测，未在演示中授权资源；截图不含密码或 API Key。
+>
+> These are real 1.4.0 UI captures with isolated demo project content. The CLI screen shows a local read-only detection result; no access was granted for this demo. No password or API key is shown.
 
 ---
 

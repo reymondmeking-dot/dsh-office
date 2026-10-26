@@ -1,0 +1,80 @@
+{
+  "version": "1.4.0",
+  "duration": 18,
+  "fps": 15,
+  "width": 1280,
+  "height": 800,
+  "audio": false,
+  "fixture": "Isolated illustrative project and conversations; no model task is executed. CLI authentication status is detected without exposing credentials or granting access.",
+  "capture": "Six actual UI screenshots, held for three seconds each. Electron 39.8.5 app, DSH_OFFICE_HEADLESS=1, isolated userData/DSH_HOME/CODEX_HOME, CDP screenshots; FFmpeg encode. Not a continuous task recording.",
+  "scenes": [
+    "Chinese office",
+    "Project manager",
+    "Independent project conversation",
+    "Markdown file preview",
+    "Local CLI resource detection",
+    "English office"
+  ],
+  "files": [
+    {
+      "path": "docs/demo/dsh-office-1.4.0-demo.mp4",
+      "bytes": 363897,
+      "sha256": "5ec489e582c219b8a2320f38f6d2c880410e7cda9e74a058357ed8b16b7d35e8"
+    },
+    {
+      "path": "docs/demo/dsh-office-1.4.0-preview.gif",
+      "bytes": 493420,
+      "sha256": "0e15acd82d78cb97d229c5e1ceeddcc5700f5cfc5a370446de7d5babfdb95957"
+    },
+    {
+      "path": "docs/images/v1.4.0-office-zh.jpg",
+      "bytes": 138317,
+      "sha256": "531731e8642fea98e8b2eb3b1c92b87f4a52f32ccdb817c2ed62d41d61066b4c"
+    },
+    {
+      "path": "docs/images/v1.4.0-projects-zh.jpg",
+      "bytes": 64320,
+      "sha256": "df9006d9f96fa21a3dafce4d27ceb8587fa6c9f81e418bb87f755da28df7c96e"
+    },
+    {
+      "path": "docs/images/v1.4.0-chat-zh.jpg",
+      "bytes": 74755,
+      "sha256": "08277341686d176557b10df8aed034229d9287f1b26682a62e143c31b9a9a42c"
+    },
+    {
+      "path": "docs/images/v1.4.0-files-zh.jpg",
+      "bytes": 53767,
+      "sha256": "56e0a7cc1f2a5f73669a5d7b402dd50881f46375af54283dcb7682d0a95cf1a2"
+    },
+    {
+      "path": "docs/images/v1.4.0-cli-zh.jpg",
+      "bytes": 71365,
+      "sha256": "618d673d84ca62723b40102aac9b8c4699bb542ffb4dab31d8a9c76d22796d12"
+    },
+    {
+      "path": "docs/images/v1.4.0-office-en.jpg",
+      "bytes": 139451,
+      "sha256": "1486cd91689d2d190aa441189c4a43b43ddd5800e650158738afaa2fc0fe7146"
+    },
+    {
+      "path": "docs/images/v1.4.0-projects-en.jpg",
+      "bytes": 69342,
+      "sha256": "57f42432762afdafaee341dfb9e13743872441f0e202fc2af1e7446e21d2f19e"
+    },
+    {
+      "path": "docs/images/v1.4.0-chat-en.jpg",
+      "bytes": 76838,
+      "sha256": "2f0e88987734ffec2bac5cf6a1794421ef809a02692e44ecedde89b4a53f220d"
+    },
+    {
+      "path": "docs/images/v1.4.0-files-en.jpg",
+      "bytes": 53572,
+      "sha256": "ce448201be402d66446d105787b0d28f0064fcefd39bc123b7f1c52f2f270e79"
+    },
+    {
+      "path": "docs/images/v1.4.0-cli-en.jpg",
+      "bytes": 77460,
+      "sha256": "4034f3ec6c3b630b49ac5c32f5c433097f63b9c363d8b0c16e925beacb0676a6"
+    }
+  ]
+}
