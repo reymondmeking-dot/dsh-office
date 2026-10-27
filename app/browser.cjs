@@ -14,8 +14,8 @@ const WORLD = 1004
 const serialize = x => JSON.stringify(x).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 class BrowserService {
-  constructor({ getWindow, getSettings, emit = () => {}, log = () => {}, userData, cliTool }) {
-    Object.assign(this, { getWindow, getSettings, emit, log, userData, cliTool })
+  constructor({ getWindow, getSettings, emit = () => {}, log = () => {}, userData, cliTool, envSecrets }) {
+    Object.assign(this, { getWindow, getSettings, emit, log, userData, cliTool, envSecrets })
     this.tabs = new Map(); this.contexts = new Map(); this.pending = new Map(); this.downloads = []
     this.activeId = ''; this.visible = false; this.bounds = { x: 20, y: 180, width: 1200, height: 580 }
     this.vault = new Vault(path.join(userData, 'vault.json'), safeStorage)
@@ -376,6 +376,7 @@ class BrowserService {
   async sanitize(value) {
     const secrets = new Set([...this.tabs.values()].flatMap(t => [...t.secrets]))
     try { if (this.vault.available()) for (const e of this.vault.read()) secrets.add(e.password) } catch {}
+    try { for (const s of (this.envSecrets?.() || [])) secrets.add(s) } catch {}
     return P.redactResult(value, secrets)
   }
   async tool(name, args = {}, contextId, projectDir, owner) { return this.sanitize(await this.performTool(name, args, contextId, projectDir, owner)) }

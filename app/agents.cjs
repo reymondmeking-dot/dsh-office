@@ -130,7 +130,7 @@ const ENV_KEYISH = /(^|_)(API_?KEY|APIKEY|AUTH_?TOKEN|ACCESS_?TOKEN|API_?TOKEN)$
 const ENV_BASEISH = /(BASE_?URL|API_?BASE|BASE_?URI|API_?ENDPOINT|_ENDPOINT)$/i
 
 /** `.env` files in agent homes and the working directory. */
-function envFiles() {
+function envFiles(extra = []) {
   const h = home(), dsh = process.env.DSH_HOME || path.join(h, '.dsh')
   const hermes = process.env.HERMES_HOME || path.join(h, '.hermes')
   const list = [
@@ -139,7 +139,7 @@ function envFiles() {
     path.join(h, '.codex', '.env'), path.join(h, '.claude', '.env'),
     path.join(h, '.config', 'opencode', '.env'), path.join(h, '.opencode', '.env'),
     path.join(h, '.cc-switch', '.env'), path.join(h, '.gemini', '.env'),
-    path.join(h, '.qwen', '.env'), path.join(process.cwd(), '.env'),
+    path.join(h, '.qwen', '.env'), path.join(process.cwd(), '.env'), ...extra,
   ]
   return [...new Set(list)].filter(f => { try { return fs.statSync(f).isFile() } catch { return false } })
 }
@@ -418,4 +418,4 @@ function scan() {
 /** Raw key for an import; undefined when the record carried none. */
 function secretOf(id) { return secrets.get(String(id)) }
 
-module.exports = { scan, secretOf, toRoute, keyRefOf, mapApi, normalizeBase, modelEntry, parseDotEnv, KNOWN_ENV }
+module.exports = { scan, secretOf, toRoute, keyRefOf, mapApi, normalizeBase, modelEntry, parseDotEnv, envFiles, KNOWN_ENV }

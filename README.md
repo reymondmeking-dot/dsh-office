@@ -1,4 +1,4 @@
-# DSH Office 1.4.0
+# DSH Office 1.5.0
 
 <p align="center">
   <a href="docs/demo/dsh-office-1.4.0-demo.mp4">
@@ -15,6 +15,12 @@
 **像素办公室多 Agent 协作桌面应用** — 给 DeepSeek Harness (DSH) 套上一间会动的像素办公室：你给 CEO 派任务，CEO 定目标、HR 招人分工、员工并行干活、HR 审核返工、CEO 验收归档，全部在一间像素风办公室里实时上演。
 
 A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; the CEO sets the goal, HR hires a team and schedules the work, employees execute in parallel with HR review/rework loops, and the CEO accepts and archives everything — acted out live in a pixel-art office.
+
+**1.5.0 · 解放双手**：[一键导入 59 类本机 CLI（读 / 完全授权）](#本机-cli-资源--local-cli-resources) · [一键导入环境变量（加密、注入、遮蔽）](#环境变量--environment-variables) · [免手操作：提问超时继续、故障自动重试、重启续跑、系统通知](#免手操作自动驾驶--hands-free-autopilot) · [与 Hermes / Codex / Claude Code 对比](#与主流-agent-对比--compared-with-hermes-codex-and-claude-code)
+
+**1.5.0 · hands-free**: [one-click import of 59 kinds of local CLIs (read / full access)](#本机-cli-资源--local-cli-resources) · [one-click environment-variable import (encrypted, injected, redacted)](#环境变量--environment-variables) · [autopilot: question timeout, automatic retries, resume after restart, notifications](#免手操作自动驾驶--hands-free-autopilot) · [Compared with Hermes / Codex / Claude Code](#与主流-agent-对比--compared-with-hermes-codex-and-claude-code)
+
+> 演示视频与截图仍为 1.4.0 界面；1.5.0 新增的设置区截图见下文。/ The demo video and screenshots show the 1.4.0 UI; 1.5.0 settings screenshots are below.
 
 **1.4.0**：[项目与多对话](#项目多对话与成果引用--projects-conversations--references) · [浏览器与文件预览](#浏览器文件预览与本地密码--browser-file-previews--local-passwords) · [本机 CLI 资源](#本机-cli-资源--local-cli-resources)
 
@@ -173,27 +179,112 @@ This feature reuses **Electron 39.8.5's bundled Chromium / WebContentsView**. It
 
 ## 本机 CLI 资源 / Local CLI resources
 
+<p align="center"><img src="docs/images/v15-cli.png" alt="本机 CLI 资源 / Local CLI resources" width="800" /></p>
+
 **中文**
 
-设置中的「本机 CLI 资源」支持一键检测 **GitHub CLI** 与 **TapTap CLI**。列表区分未安装、未登录、可授权与尚未联网核验的凭据状态，并可展开查看命令范围。资源**默认不授权**；只有勾选并点击「确认所选授权」、完成界面确认后，员工才可复用对应 CLI 当前账号的登录会话。取消勾选并确认保存后，后续调用立即使用新授权，无需重启；这不会注销 CLI 自身账号。
+「设置 → 本机 CLI 资源 → 一键检测」扫描本机常用 CLI，内置 59 项，按类别分组：代码托管（Git、GitHub、GitLab）、云平台（AWS、Azure、gcloud、阿里云、腾讯云、火山方舟 arkcli、TapTap）、部署 / 基础设施（Vercel、Netlify、Wrangler、Fly、Railway、Supabase、Firebase、Heroku、Stripe、Terraform、Pulumi）、容器（Docker、Podman、kubectl、Helm）、语言与包管理（Node、npm、pnpm、Yarn、Bun、Deno、Python、pip、uv、Cargo、Go、Java、Maven、Gradle、dotnet 等）、数据库（psql、mysql、sqlite3、redis-cli）、多媒体（ffmpeg、ImageMagick）、工具（ripgrep、jq、adb、飞书 lark-cli 等）以及 AI CLI（Ollama、Codex、Claude Code、Gemini、Qwen、OpenCode、Hermes）。未在目录中的 CLI 可填可执行文件的绝对路径「添加自定义 CLI」。实际列出多少取决于本机安装情况；本机实测扫描到 22 个已安装项。
 
-GitHub 检测调用 CLI 的 `gh auth status --json hosts`，使用其真实账号核验结果。TapTap 使用 `auth status --offline --json`；`credentials-present` 仅表示存在尚未过期的本地登录凭据，**不表示已验证联网服务可用**。首次实际读取仍可能因账号、网络或服务权限失败。Office 不打开、复制或导出 CLI 的登录凭据文件，状态列表也不返回 token。
+资源**默认不授权**。勾选（或「全选已安装」）后点「确认所选授权」，再在确认框中确认，员工才能调用。两种授权：
 
-内置 `office-cli` MCP 插件同时挂到 DSH / Codex，提供 `mcp__office-cli__cli_list_resources` 与 `mcp__office-cli__cli_call`。前者只列用户已授权的资源；后者接收资源 ID 和参数数组。范围限于界面列出的只读命令，例如 GitHub 仓库、issue、PR 的查看 / 列表 / 搜索，以及 TapTap overview、开发者 / 应用列表和应用资料读取。TapTap 执行前还检查对应命令帮助中的 `Risk: read`。不开放任意 shell、`gh api`、登录 / token / 配置读取、写入、发布、合并、文件输入或自定义端点；输出有超时、大小上限和凭据形态遮蔽。没有安装的 CLI 不会被自动下载。
+- **只读**（仅 GitHub CLI / TapTap CLI 可选）：沿用 1.4 的白名单，只开放列出的查看 / 列表 / 搜索命令，TapTap 还需命令帮助声明 `Risk: read`。
+- **完全授权**（其他 CLI 均为此模式，GitHub / TapTap 也可选）：员工可传入任意参数，包括写入、推送、部署和删除。命令以参数数组直接启动，**不经过 shell 字符串**；`.cmd` / `.ps1` 包装脚本由 Office 选择对应解释器启动。工作目录固定为当前项目目录。超时 5–600 秒（默认 120 秒），输出上限 256 KB。
+
+CLI 进程继承本机登录状态（如 `gh` / `aws` / `kubectl` 的已有配置），并注入下方「环境变量」中已启用的变量。输出会遮蔽凭据形态的字符串和已导入的密钥值。取消勾选并确认即可撤销，下一次调用立即生效。Office 不复制、不导出 CLI 的登录凭据。完全授权意味着员工能以你的账号执行破坏性操作，请只勾选确实需要的 CLI。
+
+内置 `office-cli` MCP 插件同时挂到 DSH 与 Codex，提供 `mcp__office-cli__cli_list_resources` 与 `mcp__office-cli__cli_call`（`resource`、`args`、可选 `timeoutSec`）。
 
 **English**
 
-Settings → Local CLI resources detects **GitHub CLI** and **TapTap CLI**. The list distinguishes missing installations, signed-out sessions, usable accounts and credentials not checked online; expand a row to inspect its command scope. Resources are **not authorized by default**. Employees can reuse a CLI's current session only after the user selects it, chooses Confirm selected access and confirms in the UI. Uncheck and confirm to revoke access for subsequent calls immediately, without restarting or signing out the CLI itself.
+Settings → Local CLI resources → Detect resources scans for common CLIs: 59 built-in entries grouped by category. Categories: code hosting (Git, GitHub, GitLab); cloud (AWS, Azure, gcloud, Alibaba Cloud, Tencent Cloud, Volcengine Ark, TapTap); deploy / infrastructure (Vercel, Netlify, Wrangler, Fly, Railway, Supabase, Firebase, Heroku, Stripe, Terraform, Pulumi); containers (Docker, Podman, kubectl, Helm); languages and package managers (Node, npm, pnpm, Yarn, Bun, Deno, Python, pip, uv, Cargo, Go, Java, Maven, Gradle, dotnet…); databases (psql, mysql, sqlite3, redis-cli); media (ffmpeg, ImageMagick); tools (ripgrep, jq, adb, Lark CLI…); and AI CLIs (Ollama, Codex, Claude Code, Gemini, Qwen, OpenCode, Hermes). To add a CLI that is not in the catalog, use Add custom CLI with the absolute path to its executable. How many appear depends on what is installed; the scan found 22 on the development machine.
 
-GitHub detection runs `gh auth status --json hosts` and uses the CLI's real account-check result. TapTap runs `auth status --offline --json`: `credentials-present` means a saved, unexpired local credential, **not verified online service availability**. A later read can still fail because of account, network or service permissions. Office does not open, copy or export CLI credential files, and the status list does not return tokens.
+Resources are **not authorized by default**. Tick them (or Select all installed), choose Confirm selected access, then confirm in the dialog. Two grant levels:
 
-The built-in `office-cli` MCP plugin connects to both DSH and Codex with `mcp__office-cli__cli_list_resources` and `mcp__office-cli__cli_call`. The former lists only user-authorized resources; the latter takes a resource ID and an argument array. Access is restricted to the displayed read allowlist: GitHub repository / issue / PR views, lists and searches, and TapTap overview, developer / app lists and app-information reads. TapTap command help must also declare `Risk: read` before execution. Arbitrary shells, `gh api`, auth / token / configuration reads, writes, publishing, merging, file inputs and custom endpoints are not exposed. Results are bounded by time / size limits and redact credential-shaped values. Missing CLIs are not downloaded automatically.
+- **Read-only** (GitHub CLI / TapTap CLI only): the 1.4 allowlist of view / list / search commands. TapTap commands must also declare `Risk: read`.
+- **Full access** (every other CLI; optional for GitHub / TapTap): employees can pass any arguments, including writes, pushes, deploys and deletes. Commands launch from an argument array, **never a shell string**; Office picks the interpreter for `.cmd` / `.ps1` wrappers. The working directory is the current project. Timeout is 5–600 s (default 120 s) and output is capped at 256 KB.
 
-## 关于 1.4.0 / About 1.4.0
+CLI processes keep the machine's existing sign-ins (for example `gh`, `aws` or `kubectl` configuration) and receive the enabled variables from Environment variables below. Output redacts credential-shaped strings and imported secret values. Untick and confirm to revoke; the next call is affected immediately. Office never copies or exports CLI credentials. Full access lets employees run destructive commands with your accounts, so grant only the CLIs a project needs.
 
-「设置 → 关于本程序」显示版本 **1.4.0**，并提供 [GitHub 源码仓库](https://github.com/reymondmeking-dot/dsh-office) 与 [Planto AI 官网](https://planto-ai.com/)；链接在内置浏览器中打开。
+The built-in `office-cli` MCP plugin is attached to both DSH and Codex with `mcp__office-cli__cli_list_resources` and `mcp__office-cli__cli_call` (`resource`, `args`, optional `timeoutSec`).
 
-Settings → About DSH Office shows version **1.4.0** and links to the [GitHub repository](https://github.com/reymondmeking-dot/dsh-office) and [Planto AI website](https://planto-ai.com/), opening in the built-in browser.
+## 环境变量 / Environment variables
+
+<p align="center"><img src="docs/images/v15-env.png" alt="环境变量 / Environment variables" width="800" /></p>
+
+**中文**
+
+「设置 → 环境变量 → 一键导入…」把 API Key、云账号、数据库地址等交给员工，来源有三种：
+
+- **系统环境变量**：自动过滤操作系统和终端噪声（COMPUTERNAME、PROCESSOR_* 等）。
+- **本机各 Agent 的 `.env`**：DSH、Hermes、Codex、Claude、Gemini、Qwen、OpenCode、cc-switch，以及工作区的 `.env` / `.env.local`。
+- **直接粘贴**：支持 `KEY=VALUE`、`export KEY=…`、`$env:KEY=…` 写法。
+
+弹窗按来源分组，可筛选名称、只看密钥类，并选择作用范围（DSH + Codex / 仅 DSH / 仅 Codex），确认后导入。
+
+- **加密**：值用系统凭据库（Electron safeStorage；Windows 上为 DPAPI）加密，保存在用户数据目录的 `env-vault.json`。系统只提供明文后备存储时拒绝保存。
+- **不出主进程**：界面只拿到名称和打码值，候选项用不透明 ID 选择；值不会写进设置、提示词或日志。
+- **注入**：Codex 进程直接继承这些变量（同时设置 `shell_environment_policy.inherit=all`）；授权的 CLI 同样会收到。DSH 运行时默认会从子进程环境中剔除名字含 KEY / TOKEN / SECRET / PASSWORD 的变量，因此 Office 增加了一个 DSH 插件 `app/dsh/env-inject.mjs`，只把你导入并启用的变量逐条加到员工的每次 shell 命令里。已实测：没有插件时 `MY_TEST_API_KEY` 为空，加上插件后能取到值。
+- **遮蔽**：密钥类名称或看起来像凭据的值（长令牌、带密码的 URL），出现在 Office 工具输出（CLI、浏览器）中时替换为 `[redacted]`。员工自己的 shell 能直接读取这些值，这正是导入的目的。
+- **管理**：可逐个停用、改作用范围、删除，或「全部清除」。修改从下一个员工会话开始生效（CLI 调用立即生效）。系统保留名（PATH、NODE_OPTIONS、HOME、代理、`DSH_*`、`ELECTRON_*` 等）会被拒绝导入。
+
+**English**
+
+Settings → Environment variables → Import… hands API keys, cloud accounts, database URLs and more to employees. There are three sources:
+
+- **System variables**, with OS and terminal noise (COMPUTERNAME, PROCESSOR_*…) filtered out.
+- **Agent `.env` files on this machine**: DSH, Hermes, Codex, Claude, Gemini, Qwen, OpenCode and cc-switch, plus the workspace `.env` / `.env.local`.
+- **Pasted lines** in `KEY=VALUE`, `export KEY=…` or `$env:KEY=…` form.
+
+The picker groups candidates by source and can filter by name or show secrets only. Choose a scope (DSH + Codex / DSH only / Codex only), then confirm to import.
+
+- **Encrypted** with the OS credential store (Electron safeStorage; DPAPI on Windows) in `env-vault.json` under the user-data directory. Office refuses to store anything when only plaintext fallback storage is available.
+- **Kept in the main process**: the UI sees names and masked values only and selects candidates by opaque IDs. Values never enter settings, prompts or logs.
+- **Injected**: Codex processes inherit the variables directly (with `shell_environment_policy.inherit=all`), and so do granted CLIs. The DSH runtime strips variables whose names contain KEY / TOKEN / SECRET / PASSWORD from child environments by default, so Office adds a DSH plugin, `app/dsh/env-inject.mjs`, that passes only your imported, enabled variables to every employee shell command. Verified: without the plugin, `MY_TEST_API_KEY` arrives empty; with it, the command reads the value.
+- **Redacted**: secret-named variables and credential-looking values (long tokens, URLs with passwords) are replaced with `[redacted]` when they appear in Office tool output (CLI, browser). Employee shells can still read the values, which is the point of importing them.
+- **Managed**: disable, re-scope or delete each variable, or Clear all. Changes apply from the next employee session; CLI calls pick them up immediately. Reserved names (PATH, NODE_OPTIONS, HOME, proxies, `DSH_*`, `ELECTRON_*`…) are rejected.
+
+## 免手操作（自动驾驶） / Hands-free (autopilot)
+
+<p align="center"><img src="docs/images/v15-autopilot.png" alt="免手操作 / Autopilot" width="800" /></p>
+
+| 设置 / Setting | 默认 / Default | 行为 / Behavior |
+|---|---|---|
+| 提问等待 / Question wait | 0（一直等 / wait forever） | 设为 N 秒后，CEO 的澄清问题若无人回答，就按它在问题里写明的合理假设继续；弹窗显示倒计时。/ After N seconds an unanswered CEO question continues on the CEO's stated assumptions; the dialog shows a countdown. |
+| 故障自动重试 / Automatic retries | 2 | 网络错误、429 / 5xx、超载、超时、运行时退出时，员工任务按 3 s → 9 s → 27 s 退避重试，并提示员工先检查已写好的文件再继续。逻辑错误不重试。/ Network errors, 429 / 5xx, overload, timeouts and runtime exits retry with 3 s → 9 s → 27 s backoff, and the employee is told to check files already written before continuing. Logic errors are not retried. |
+| 重启后自动续跑 / Resume after restart | 开 / on | 应用退出时未完成的项目在下次启动后重新排队，在原项目目录内继续（每个项目最多续跑 2 次）。关闭时与 1.4 一样标记为中断。/ Projects left unfinished at exit are re-queued on the next launch and continue in the same folder (at most 2 resumes per project). When off, they are marked interrupted as in 1.4. |
+| 系统通知 / Desktop notifications | 开 / on | 项目交付、失败、CEO 提问时弹出系统通知，点击回到窗口。/ Notifications on delivery, failure and CEO questions; click to focus the window. |
+| 工作区模式下允许 Codex 联网 / Codex network in workspace mode | 开 / on | 为 `codex exec` 设置 `sandbox_workspace_write.network_access=true`，员工可以 `npm install`、`git push`、调用 API。/ Sets `sandbox_workspace_write.network_access=true` so Codex employees can `npm install`, `git push` and call APIs. |
+
+另外，员工交付后 Office 会检查约定的主交付文件是否真实存在，并把检查结果附给 HR 审核，避免只凭自述验收。/ After an employee reports, Office checks that the promised main deliverable actually exists and attaches the result for HR review, so acceptance does not rely on self-reports alone.
+
+## 与主流 Agent 对比 / Compared with Hermes, Codex and Claude Code
+
+下表依据各项目公开文档整理（2026-10），只比较与「解放双手」相关的能力；各产品迭代很快，以其最新文档为准。/ Based on each project's public documentation (2026-10), limited to hands-free capabilities. These products change quickly; check their latest docs.
+
+| 能力 / Capability | DSH Office 1.5 | Hermes Agent | Codex CLI | Claude Code |
+|---|---|---|---|---|
+| 多角色团队（CEO / HR / 员工并行 + 审核返工）/ Multi-role team with review loop | ✅ 内置 / built in | 子代理 / subagents | — | 子代理 / subagents |
+| 一键扫描并授权本机 CLI / One-click local CLI grant | ✅ 59 项目录 + 自定义 / catalog + custom | 终端工具 / terminal tool | shell + 审批 / shell + approvals | Bash + 权限规则 / permission rules |
+| 一键导入环境变量（加密、按引擎范围、输出遮蔽）/ One-click encrypted env import with redaction | ✅ | `~/.hermes/.env` | `shell_environment_policy` | settings `env` |
+| 提问超时自动继续 / Question timeout continues | ✅ | 审批超时默认拒绝 / approval timeout denies | 非交互 `exec` / non-interactive | 非交互 `-p` / non-interactive |
+| 故障自动重试 + 重启续跑 / Retry + resume after restart | ✅ | 会话恢复 / session resume | `resume` | `--resume` / `--continue` |
+| 定时任务 / Scheduled tasks | ❌ 尚未支持 / not yet | ✅ cron | — | — |
+| 聊天软件远程审批 / Messaging-app approvals | ❌ | ✅ 网关 / gateway | — | — |
+| 自动生成技能 / Self-created skills | ❌ | ✅ | — | — |
+| 编辑检查点 / 回滚 / Edit checkpoints & rewind | ❌（项目目录隔离 / per-project folders） | ✅ | — | ✅ |
+| 可视化办公室 / Visual office UI | ✅ 像素办公室 / pixel office | TUI / 网关 | TUI | TUI / IDE |
+
+「—」表示在所引文档中未找到对应说明，不代表一定不支持。/ "—" means we did not find it in the cited docs, not that it is definitely absent.
+
+DSH Office 本身不是模型或 Agent 内核：员工跑在 DSH 运行时或 Codex CLI 上，Office 负责编排、授权和界面。定时任务、聊天软件审批、检查点等尚未实现，列为后续方向。/ DSH Office is not a model or an agent kernel: employees run on the DSH runtime or Codex CLI, and Office provides orchestration, grants and the UI. Scheduled tasks, messaging approvals and checkpoints are not implemented yet and remain on the roadmap.
+
+参考 / Sources: [Hermes Agent](https://github.com/NousResearch/hermes-agent) · [Hermes security](https://hermes-agent.nousresearch.com/docs/user-guide/security) · [Codex approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security) · [Codex advanced config](https://learn.chatgpt.com/docs/config-file/config-advanced) · [Claude Code permission modes](https://code.claude.com/docs/en/permission-modes.md)
+
+## 关于 1.5.0 / About 1.5.0
+
+「设置 → 关于本程序」显示版本 **1.5.0**，并提供 [GitHub 源码仓库](https://github.com/reymondmeking-dot/dsh-office) 与 [Planto AI 官网](https://planto-ai.com/)；链接在内置浏览器中打开。
+
+Settings → About DSH Office shows version **1.5.0** and links to the [GitHub repository](https://github.com/reymondmeking-dot/dsh-office) and [Planto AI website](https://planto-ai.com/), opening in the built-in browser.
 
 ---
 
@@ -253,6 +344,8 @@ node --test scripts/parameters.test.cjs scripts/extensions.test.cjs scripts/test
 
 ```powershell
 # 本地验收脚本 / Local acceptance scripts (Node.js 22+)
+node tmp/v15-e2e.mjs        # 1.5: CLI 扫描 / 授权、环境变量导入 / 注入 / 遮蔽、自动驾驶设置（不调用模型）/ CLI scan & grants, env import / injection / redaction, autopilot settings (no model calls)
+node tmp/env-plugin-check.mjs  # DSH shell 是否收到导入的 *_KEY 变量 / whether DSH shells receive imported *_KEY variables
 node tmp/browser-e2e.mjs dsh
 node tmp/browser-e2e.mjs codex
 ```

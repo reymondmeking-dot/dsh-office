@@ -119,7 +119,7 @@ test('SDK runtime launches with the generated final overlay without contacting a
     child.stdout.setEncoding = child.stderr.setEncoding = () => {}
     child.stdin = { write: text => { const request = JSON.parse(text); child.stdout.emit('data', JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {} }) + '\n') } }
     const fakeChildProcess = { spawn: (node, args, options) => { launch = { node, args, options }; return child }, execFileSync() { throw new Error('unexpected binary lookup') } }
-    const context = { module: { exports: {} }, require: id => id === 'node:child_process' ? fakeChildProcess : localRequire(id), process, setTimeout, console }
+    const context = { module: { exports: {} }, require: id => id === 'node:child_process' ? fakeChildProcess : localRequire(id), process, setTimeout, console, __dirname: path.dirname(filename), __filename: filename }
     vm.runInNewContext(fs.readFileSync(filename, 'utf8'), context, { filename })
     const pool = new context.module.exports.RuntimePool(settings({ workspace: path.join(dir, 'workspace'), nodePath: process.execPath, proxyPort: 0 }))
     const rt = pool.get('route-model', false, 'medium')

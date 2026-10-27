@@ -122,14 +122,41 @@
     if (b.maxPages > 100 || b.maxTaskMs < 1000 || b.maxTaskMs > 3600000) throw new Error(M('浏览限制应为 1–100 页，1 秒–60 分钟', 'Browser limits must be 1–100 pages and 1 second–60 minutes'))
     return b
   }
+  /**
+   * Hands-free options. askTimeoutSec: a CEO question auto-continues with the CEO's
+   * own judgment after this many seconds (0 = wait for the user). retries: automatic
+   * retries of a transient model/network failure per employee turn. resume: re-queue
+   * projects interrupted by an app exit. notify: desktop notification on finish/ask.
+   */
+  const DEFAULT_AUTOPILOT = Object.freeze({ askTimeoutSec: 0, retries: 2, resume: true, notify: true })
+  function normalizeAutopilot(raw) {
+    if (raw === undefined || raw === null) return { ...DEFAULT_AUTOPILOT }
+    if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error(M('自动驾驶设置必须是对象', 'Autopilot settings must be an object'))
+    const a = { ...DEFAULT_AUTOPILOT, ...raw }
+    integer(a.askTimeoutSec, M('提问等待时间', 'Question wait time'), 0); integer(a.retries, M('自动重试次数', 'Automatic retries'), 0)
+    if (a.askTimeoutSec > 86400 || a.retries > 5) throw new Error(M('提问等待 0–86400 秒，自动重试 0–5 次', 'Question wait must be 0–86400 s and retries 0–5'))
+    for (const k of ['resume', 'notify']) if (typeof a[k] !== 'boolean') throw new Error(M('自动驾驶开关必须是布尔值', 'Autopilot switches must be true or false'))
+    return { askTimeoutSec: a.askTimeoutSec, retries: a.retries, resume: a.resume, notify: a.notify }
+  }
   function validateSettings(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(M('设置必须是对象', 'Settings must be an object'))
     if (raw.models !== undefined && !Array.isArray(raw.models)) throw new Error(M('模型列表必须是数组', 'The model list must be an array'))
     const result = { ...raw, browser: normalizeBrowser(raw.browser), compaction: normalizeCompaction(raw.compaction), models: (raw.models || []).map(validateModel) }
     if (raw.cliResources !== undefined) {
-      if (!raw.cliResources || typeof raw.cliResources !== 'object' || Array.isArray(raw.cliResources) || Object.entries(raw.cliResources).some(([k,v]) => !['github','taptap'].includes(k) || typeof v !== 'boolean')) throw new Error(M('CLI 授权必须是有效的资源开关', 'CLI grants must contain valid resource switches'))
-      result.cliResources = { ...raw.cliResources }
+      if (!raw.cliResources || typeof raw.cliResources !== 'object' || Array.isArray(raw.cliResources) || Object.entries(raw.cliResources).some(([k,v]) => !/^[a-z0-9][a-z0-9._-]{0,47}$/.test(k) || ![true, false, 'read', 'full'].includes(v))) throw new Error(M('CLI 授权必须是有效的资源开关', 'CLI grants must contain valid resource switches'))
+      result.cliResources = Object.fromEntries(Object.entries(raw.cliResources).filter(([k, v]) => v !== 'read' || ['github', 'taptap'].includes(k)))
     }
+    if (raw.cliCustom !== undefined) {
+      if (!Array.isArray(raw.cliCustom) || raw.cliCustom.length > 50) throw new Error(M('自定义 CLI 列表无效', 'Invalid custom CLI list'))
+      result.cliCustom = raw.cliCustom.map(c => {
+        const id = String(c?.id || '').trim(), file = String(c?.path || '').trim()
+        if (!/^[a-z0-9][a-z0-9._-]{0,47}$/.test(id)) throw new Error(M(`CLI 标识只能用小写字母、数字、. _ -：${id || '（空）'}`, `CLI ids use lowercase letters, digits, . _ -: ${id || '(empty)'}`))
+        if (!file || file.length > 1000 || !/^(?:[A-Za-z]:[\\/]|\/)/.test(file)) throw new Error(M(`${id}：请填写可执行文件的绝对路径`, `${id}: enter an absolute path to the executable`))
+        return { id, name: String(c.name || id).slice(0, 60), path: file }
+      })
+    }
+    result.autopilot = normalizeAutopilot(raw.autopilot)
+    if (raw.networkAccess !== undefined && typeof raw.networkAccess !== 'boolean') throw new Error(M('联网开关必须是布尔值', 'Network access must be true or false'))
     const c = result.compaction
     const summaryModel = c.summarizationProvider && result.models.find(m => m.provider === c.summarizationProvider && m.model === c.summarizationModel)
     if (c.summarizationProvider && !summaryModel) throw new Error(M('摘要模型必须选用已配置的服务商和模型', 'The summary model must be a configured provider and model'))
@@ -246,5 +273,5 @@
     }
     return validateSettings(next)
   }
-  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, DEFAULT_BROWSER, normalizeBrowser, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert, msg: M })
+  return Object.freeze({ DEFAULT_CONTEXT_WINDOW, DEFAULT_COMPACTION, DEFAULT_BROWSER, DEFAULT_AUTOPILOT, normalizeAutopilot, normalizeBrowser, normalizeCompaction, recommendModel, getRecommendations: recommendModel, validateModel, modelBudget, validateSettings, migrateSettings, normalizeMcpServer, normalizeExpert, msg: M })
 })

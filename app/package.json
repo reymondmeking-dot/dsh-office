@@ -1,7 +1,7 @@
 {
   "name": "dsh-office",
   "productName": "DSH Office",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "DeepSeek Harness 像素办公室：CEO / HR / 员工多 Agent 协作桌面应用",
   "main": "main.cjs",
   "private": true

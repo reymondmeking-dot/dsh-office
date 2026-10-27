@@ -75,6 +75,9 @@ const DEFAULT_SETTINGS = {
   skillToggles: {},
   browser: parameters.DEFAULT_BROWSER,
   cliResources: {},
+  cliCustom: [],
+  autopilot: parameters.DEFAULT_AUTOPILOT,
+  networkAccess: true,
 }
 const NO_MODEL_MSG = () => T('err.noModel')
 /** Default per-request output cap used to sanity-check a model entry. */
@@ -182,8 +185,12 @@ const publicAgent = a => ({ ...a, name: shownName(a), title: shownTitle(a), effe
 
 // ---------- runtime ----------
 let pool
+/** Encrypted imported environment variables (Settings → Environment). Created after app ready. */
+let envStore = null
+const envFor = engine => envStore ? envStore.injected(engine) : {}
+const envSecrets = () => envStore ? envStore.secrets() : []
 function initPool() {
-  pool = new RuntimePool(settings, log)
+  pool = new RuntimePool(settings, log, { env: envFor })
 }
 /** Enabled MCP servers / experts / skills right now (what the pool was configured with). */
 const liveExt = () => pool?.ext || extensions.resolve(settings, extensions.loadPlugins(PLUGIN_DIR), extensions.listSkills(SKILL_DIR))
@@ -208,13 +215,33 @@ function toolLabel(name, args) {
     let site = ''; try { site = new URL(a.url || a.origin || '').hostname } catch {}
     return T('browser.act.' + (['search','open','snapshot','click','type','select','scroll','screenshot','read_file','login'].includes(key) ? key : 'open'), { site })
   }
-  if (mcp?.[1] === 'office-cli') return T('tool.cli', { resource: a.resource === 'github' ? 'GitHub CLI' : a.resource === 'taptap' ? 'TapTap CLI' : 'CLI' })
+  if (mcp?.[1] === 'office-cli') return T('tool.cli', { resource: (cli?.entries?.() || []).find(e => e.id === a.resource)?.name || a.resource || 'CLI' })
   if (mcp) return T('tool.mcp', { server: mcp[1], name: mcp[2] })
   if (name === 'skill' && (a.name || a.skill)) return T('tool.skillNamed', { name: String(a.name || a.skill) })
   return map[name] || T('tool.other', { name })
 }
 
+/** Model, network and runtime hiccups worth retrying; logic errors are not. */
+const TRANSIENT = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network|timed? ?out|\b(429|500|502|503|504|529)\b|rate.?limit|overloaded|temporarily|unavailable|runtime exited/i
 async function runAgent(a, sessionTag, prompt, rush) {
+  const retries = Math.max(0, Math.min(5, Number(settings.autopilot?.retries ?? 2)))
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await runAgentOnce(a, sessionTag, attempt ? prompt + L(
+        `\n\n（上一次执行因网络或模型故障中断（第 ${attempt} 次重试）。先检查已经写好的文件，再接着完成，不要从头重做。）`,
+        `\n\n(The previous attempt was interrupted by a network or model failure; retry ${attempt}. Check files already written and continue from there instead of starting over.)`) : prompt, rush)
+    } catch (err) {
+      const msg = String(err?.message || err)
+      if (attempt >= retries || !TRANSIENT.test(msg)) throw err
+      const wait = Math.min(60000, 3000 * 3 ** attempt)
+      log(`agent ${a.id} ${sessionTag} transient failure, retry ${attempt + 1}/${retries} in ${wait}ms: ${msg.slice(0, 200)}`)
+      setAgent(a.id, { activity: L(`网络/模型故障，${Math.round(wait / 1000)} 秒后自动重试`, `Network/model hiccup, retrying in ${Math.round(wait / 1000)}s`) })
+      await sleep(wait)
+    }
+  }
+}
+
+async function runAgentOnce(a, sessionTag, prompt, rush) {
   const sessionId = `${a.id}-${sessionTag}-${crypto.randomBytes(4).toString('hex')}`
   const context = { id: sessionId, projectDir: current?.dir || settings.workspace, owner: shownName(a) }
   const rt = pool.get(modelOf(a), rush, effortOf(a), context)
@@ -339,6 +366,7 @@ async function pump() {
     saveProject(current); emit('project', { project: current })
     emit('say', { id: 'ceo', text: T('say.projectFail'), ms: 6000 })
     setAgent('ceo', { status: 'idle', activity: T('act.projectFailed') })
+    notify(L('项目失败', 'Project failed'), `${current.title}: ${String(err.message || err).slice(0, 140)}`)
   } finally {
     current = null
     pump()
@@ -662,6 +690,8 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
       let report, ok = true
       try { report = await runAgent(h, round ? `rework${round}` : 'work', prompt, rush()) } catch (err) { ok = false; report = L(`状态：受阻\n出错了：`, `Status: blocked\nError: `) + String(err.message || err).slice(0, 300) }
       report = (report || L('状态：完成\n已完成。', 'Status: done\nDone.')).trim()
+      // Office checks the promised file itself so HR reviews facts, not claims.
+      if (ok && !fs.existsSync(path.join(p.dir, h.deliverable))) report += L(`\n\n【Office 检查】主交付文件 ${p.rel}/${h.deliverable} 不存在。`, `\n\n[Office check] The main deliverable ${p.rel}/${h.deliverable} does not exist.`)
       const rec = { id: h.id, name: h.name, title: h.title, ok, status: ok ? parseStatus(report) : 'blocked', report, deliverable: h.deliverable, round, at: Date.now() }
 
       // walk to HR and report
@@ -757,6 +787,7 @@ ${finals.map(r => `### ${r.name}（${r.title}）· ${tag(r.status)}${r.review ? 
   p.files = listFiles(p.dir).length
   p.finishedAt = Date.now()
   phase(p, 'done', '已验收归档')
+  notify(L('项目已交付', 'Project delivered'), `${p.title}: ${p.summary.slice(0, 140)}`)
   setAgent('ceo', { status: 'idle', activity: T('act.archived', { title: p.title }) })
   emit('celebrate', {})
 }
@@ -765,9 +796,29 @@ ${finals.map(r => `### ${r.name}（${r.title}）· ${tag(r.status)}${r.review ? 
 let pendingAsk = null
 function askUser(p, questions) {
   return new Promise(resolve => {
-    pendingAsk = { project: p.id, title: p.title, questions, resolve }
-    emit('ask', { project: p.id, title: p.title, questions })
+    const wait = Number(settings.autopilot?.askTimeoutSec) || 0
+    // Hands-free: unanswered questions continue on the CEO's stated assumptions.
+    const timer = wait > 0 ? setTimeout(() => {
+      if (pendingAsk?.resolve !== done) return
+      pendingAsk = null; log(`ask ${p.id} auto-continued after ${wait}s`)
+      emit('ask-done', { project: p.id, skipped: true, auto: true }); resolve(null)
+    }, wait * 1000) : null
+    const done = answers => { clearTimeout(timer); resolve(answers) }
+    pendingAsk = { project: p.id, title: p.title, questions, resolve: done, deadline: timer ? Date.now() + wait * 1000 : null }
+    emit('ask', { project: p.id, title: p.title, questions, deadline: pendingAsk.deadline })
+    notify(L('CEO 有问题要问你', 'The CEO has a question'), `${p.title}${timer ? L(`（${wait} 秒后按合理假设继续）`, ` (continues on assumptions in ${wait}s)`) : ''}`)
   })
+}
+/** Desktop notification for hands-free runs (finish, failure, question). */
+function notify(title, body) {
+  try {
+    if (settings.autopilot?.notify === false || process.env.DSH_OFFICE_HEADLESS === '1') return
+    const { Notification } = require('electron')
+    if (!Notification.isSupported()) return
+    const n = new Notification({ title, body: String(body || '').slice(0, 200), silent: false })
+    n.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
+    n.show()
+  } catch (err) { log(`notify failed: ${err}`) }
 }
 
 function setRush(on) {
@@ -929,7 +980,7 @@ ipcMain.handle('office:readImage', (_e, file) => {
 ipcMain.handle('office:init', () => ({
   settings, agents: state.agents.map(publicAgent), rush: state.rush,
   projects: listProjects(), current: current?.id || null, queue: queue.map(q => q.id),
-  ask: pendingAsk && { project: pendingAsk.project, title: pendingAsk.title, questions: pendingAsk.questions },
+  ask: pendingAsk && { project: pendingAsk.project, title: pendingAsk.title, questions: pendingAsk.questions, deadline: pendingAsk.deadline },
 }))
 ipcMain.handle('office:answer', (_e, answers) => {
   const a = pendingAsk; if (!a) return false
@@ -1147,15 +1198,52 @@ ipcMain.handle('office:browser', (e, action, args) => {
 ipcMain.handle('office:detectCli', () => cli.detect({ refresh: true }))
 ipcMain.handle('office:saveCliResources', async (_e, input) => {
   if (input?.confirmed !== true) throw new Error(L('请先确认 CLI 授权', 'Confirm the CLI grant first'))
-  const next = parameters.validateSettings({ ...settings, cliResources: input.enabled })
-  const detected = await cli.detect()
-  for (const [id, enabled] of Object.entries(next.cliResources)) if (enabled) {
+  const patch = { cliResources: input.enabled }
+  if (input.custom !== undefined) patch.cliCustom = input.custom
+  const next = parameters.validateSettings({ ...settings, ...patch })
+  const prevCustom = settings.cliCustom
+  settings = { ...settings, cliCustom: next.cliCustom }
+  let detected
+  try { detected = await cli.detect({ refresh: input.custom !== undefined }) } finally { settings = { ...settings, cliCustom: prevCustom } }
+  for (const [id, value] of Object.entries(next.cliResources)) if (value) {
     const r = detected.resources.find(r => r.id === id)
-    if (!r?.installed || !(r.authenticated || r.credentialAvailable)) throw new Error(L('资源未安装或没有可用登录，请先检测', 'The resource is missing or not signed in; detect it first'))
+    const mode = require('./cli-resources.cjs').grantMode(id, value)
+    if (!r?.installed || (mode === 'read' && !(r.authenticated || r.credentialAvailable))) throw new Error(L(`${r?.name || id} 未安装或没有可用登录，请先检测`, `${r?.name || id} is missing or not signed in; detect it first`))
   }
+  next.cliResources = Object.fromEntries(Object.entries(next.cliResources).filter(([, v]) => v))
   writeJson(SETTINGS_FILE, next); settings = next
   return settings.cliResources
 })
+// ---------- imported environment variables ----------
+// Values never leave main: the renderer sees names, masked values and opaque candidate ids.
+let envCandidates = new Map()
+ipcMain.handle('office:envList', () => envStore.list())
+ipcMain.handle('office:envScan', () => {
+  const files = agents.envFiles([path.join(settings.workspace, '.env'), path.join(settings.workspace, '.env.local')])
+  const list = require('./env-store.cjs').scanCandidates({ env: process.env, files })
+  envCandidates = new Map(list.map(c => [c.id, c]))
+  const stored = new Set(envStore.available() ? envStore.read().map(e => e.name.toUpperCase()) : [])
+  return list.map(({ value: _v, ...c }) => ({ ...c, stored: stored.has(c.name.toUpperCase()) }))
+})
+ipcMain.handle('office:envImport', (_e, input = {}) => {
+  if (input.confirmed !== true) throw new Error(L('请先确认导入', 'Confirm the import first'))
+  const scope = input.scope || 'all'
+  let result
+  if (typeof input.text === 'string') {
+    if (input.text.length > 256 * 1024) throw new Error(L('粘贴内容过大', 'Pasted text is too large'))
+    result = envStore.import(require('./env-store.cjs').parseDotEnv(input.text), { source: 'paste', scope })
+  } else if (Array.isArray(input.ids)) {
+    const picked = input.ids.map(id => envCandidates.get(id)).filter(Boolean)
+    const bySource = new Map()
+    for (const c of picked) { if (!bySource.has(c.source)) bySource.set(c.source, {}); bySource.get(c.source)[c.name] = c.value }
+    result = { added: [], skipped: [] }
+    for (const [source, pairs] of bySource) { const r = envStore.import(pairs, { source, scope }); result.added.push(...r.added); result.skipped.push(...r.skipped) }
+  } else throw new Error(L('没有可导入的内容', 'Nothing to import'))
+  log(`env import ${result.added.length} added, ${result.skipped.length} skipped`)
+  return { ...result, ...envStore.list() }
+})
+ipcMain.handle('office:envUpdate', (_e, name, patch) => { envStore.update(String(name), patch || {}); return envStore.list() })
+ipcMain.handle('office:envDelete', (_e, name) => { if (name === '*') envStore.clear(); else envStore.delete(String(name)); return envStore.list() })
 ipcMain.handle('office:open', async (_e, p) => {
   const full = inProjects(p)
   if (fs.statSync(full).isDirectory()) return shell.openPath(full)
@@ -1282,14 +1370,27 @@ app.whenReady().then(async () => {
   ensureHarness()
   fs.mkdirSync(projectsDir(), { recursive: true })
   const { BrowserService } = require('./browser.cjs')
-  cli = new (require('./cli-resources.cjs').CliResources)({ getSettings: () => settings })
-  browser = new BrowserService({ getWindow: () => win, getSettings: () => settings, emit, log, userData: USER, cliTool: (name, args, context) => cli.tool(name, args, context) })
+  envStore = new (require('./env-store.cjs').EnvStore)(path.join(USER, 'env-vault.json'), require('electron').safeStorage)
+  cli = new (require('./cli-resources.cjs').CliResources)({ getSettings: () => settings, getEnv: () => envFor('dsh'), getSecrets: envSecrets })
+  browser = new BrowserService({ getWindow: () => win, getSettings: () => settings, emit, log, userData: USER, envSecrets, cliTool: (name, args, context) => cli.tool(name, args, context) })
   const bridge = await browser.start()
   process.env.DSH_OFFICE_BROWSER_URL = bridge.url
   process.env.DSH_OFFICE_BROWSER_TOKEN = bridge.token
   initPool()
-  // Recover projects interrupted by a previous exit.
-  for (const p of listProjects()) if (!['done', 'failed'].includes(p.status)) { p.status = 'failed'; p.phase = '应用退出时中断'; saveProject(p) }
+  // Projects interrupted by a previous exit: re-queue them (hands-free) or mark them failed.
+  const resumable = []
+  for (const p of listProjects()) if (!['done', 'failed'].includes(p.status) && fs.existsSync(projectFile(p.dir))) {
+    const saved = readJson(projectFile(p.dir), null)
+    if (saved && settings.autopilot?.resume !== false && settings.models.length && (saved.resumes || 0) < 2) resumable.push(saved)
+    else { const x = saved || p; x.status = 'failed'; x.phase = '应用退出时中断'; saveProject(x) }
+  }
+  for (const p of resumable.sort((a, b) => a.createdAt - b.createdAt)) {
+    // Start over inside the same folder; employees see the files already written there.
+    Object.assign(p, { status: 'queued', phase: '排队中', resumes: (p.resumes || 0) + 1, team: [], assignments: [], reports: [], resumedAt: Date.now() })
+    p.brief = (p.brief || '') + (p.resumes === 1 ? L('\n\n（应用重启后自动续跑：项目目录里可能已有上次写到一半的文件，先检查再继续。）', '\n\n(Resumed after an app restart: the project folder may already contain partial files from the last run; check them and continue.)') : '')
+    saveProject(p); queue.push(p); log(`resume ${p.id}`)
+  }
+  if (queue.length) setTimeout(pump, 4000)
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 680, frame: false, backgroundColor: '#1d1f27',
     title: 'DSH Office', icon: process.platform === 'win32' ? path.join(__dirname, 'icon.ico') : path.join(__dirname, 'icon.png'), show: false,

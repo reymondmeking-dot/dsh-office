@@ -118,3 +118,42 @@ test('office-cli ships two tools and forwards only a narrow authenticated CLI ro
   try { const args = ext.codexMcpArgs([server], workspace).join('\n'); assert.match(args, /env_vars=/); assert.doesNotMatch(args, /bridge-must-stay-out-of-argv/) }
   finally { if (previous === undefined) delete process.env.DSH_OFFICE_BROWSER_TOKEN; else process.env.DSH_OFFICE_BROWSER_TOKEN = previous }
 })
+
+test('catalog scan, full-access grants run any argv in the project with imported env and redaction', async () => {
+  const { CATALOG, grantMode, validateFull, launchFor } = require('../app/cli-resources.cjs')
+  assert.ok(CATALOG.length >= 40)
+  assert.equal(new Set(CATALOG.map(c => c.id)).size, CATALOG.length)
+  for (const id of ['git', 'docker', 'kubectl', 'aws', 'az', 'gcloud', 'vercel', 'npm', 'python', 'codex', 'claude']) assert.ok(CATALOG.some(c => c.id === id), id)
+  assert.equal(grantMode('github', true), 'read'); assert.equal(grantMode('git', true), 'full'); assert.equal(grantMode('git', 'read'), ''); assert.equal(grantMode('github', 'full'), 'full'); assert.equal(grantMode('git', false), '')
+  assert.throws(() => validateFull('git status')); assert.throws(() => validateFull(['a\0b'])); assert.deepEqual(validateFull(['commit', '-m', 'a b; rm -rf /']), ['commit', '-m', 'a b; rm -rf /'])
+  assert.deepEqual(launchFor('C:\\x\\git.exe', ['status']), { cmd: 'C:\\x\\git.exe', argv: ['status'], verbatim: false })
+  if (process.platform === 'win32') {
+    assert.match(launchFor('C:\\n\\npm.cmd', ['-v']).cmd, /cmd\.exe$/i)
+    assert.match(launchFor('C:\\n\\x.ps1', ['-v']).argv.join(' '), /-ExecutionPolicy Bypass -File C:\\n\\x\.ps1 -v/)
+  }
+  const settings = { workspace, cliResources: {} }, calls = []
+  const resources = new CliResources({ getSettings: () => settings, find: id => ['git', 'docker'].includes(id) ? `C:\\bin\\${id}.exe` : '',
+    getEnv: () => ({ MY_SERVICE_TOKEN: 'tok-abcdefgh12345678' }), getSecrets: () => ['tok-abcdefgh12345678'],
+    run: async (exe, args, opts) => { calls.push({ exe, args, opts }); return { code: 0, stdout: `pushed with ${opts.env.MY_SERVICE_TOKEN}`, stderr: '' } } })
+  const detected = (await resources.detect({ refresh: true })).resources
+  assert.deepEqual(detected.filter(r => r.installed).map(r => r.id).sort(), ['docker', 'git'])
+  assert.equal(detected.find(r => r.id === 'git').status, 'installed')
+  await assert.rejects(resources.tool('cli_call', { resource: 'git', args: ['push'] }, { projectDir: workspace }), /授权|confirmed/)
+  settings.cliResources = { git: 'full' }
+  const r = await resources.tool('cli_call', { resource: 'git', args: ['push', 'origin', 'main'], timeoutSec: 30 }, { projectDir: workspace })
+  assert.equal(r.ok, true); assert.equal(r.mode, 'full'); assert.equal(r.data, 'pushed with [redacted]')
+  assert.deepEqual(calls[0].args, ['push', 'origin', 'main']); assert.equal(calls[0].opts.cwd, workspace); assert.equal(calls[0].opts.timeout, 30000)
+  assert.equal(calls[0].opts.env.MY_SERVICE_TOKEN, 'tok-abcdefgh12345678')
+  await assert.rejects(resources.tool('cli_call', { resource: 'docker', args: ['ps'] }, { projectDir: workspace }), /授权|confirmed/)
+  // Custom CLIs need an absolute existing path and are always full access.
+  settings.cliCustom = [{ id: 'mytool', name: 'My Tool', path: process.execPath }]; settings.cliResources.mytool = true
+  const custom = (await resources.detect({ refresh: true })).resources.find(x => x.id === 'mytool')
+  assert.equal(custom.installed, true); assert.equal(custom.mode, 'full'); assert.equal(custom.category, 'custom')
+})
+
+test('real full-access call runs a native binary without a shell', async () => {
+  const resources = new CliResources({ getSettings: () => ({ workspace, cliResources: { node: 'full' } }) })
+  const r = await resources.tool('cli_call', { resource: 'node', args: ['-e', 'console.log(process.cwd(), "&& echo injected")'] }, { projectDir: workspace })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(String(r.data).trim(), `${workspace} && echo injected`)
+})

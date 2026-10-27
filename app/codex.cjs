@@ -119,6 +119,10 @@ class CodexRuntime {
       '-c', `sandbox_mode="${full ? 'danger-full-access' : 'workspace-write'}"`, '-c', 'approval_policy="never"')
     // Windows needs the elevated sandbox for writes to land inside the workspace; it still blocks writes outside it.
     if (WIN && !full) a.push('-c', 'windows.sandbox="elevated"')
+    // Hands-free runs need package installs, git and API calls; the sandbox still confines writes.
+    if (!full && settings.networkAccess !== false) a.push('-c', 'sandbox_workspace_write.network_access=true')
+    // Imported variables are explicit: keep them even when Codex would drop secret-looking names.
+    a.push('-c', 'shell_environment_policy.inherit="all"', '-c', 'shell_environment_policy.ignore_default_excludes=true')
     if (this.effort && this.effort !== 'off') a.push('-c', `model_reasoning_effort="${this.effort}"`)
     // Fast mode = Codex's priority service tier. Office's own switch wins; otherwise follow the user's Codex config.
     if ((settings.codexFast ?? configFast())) a.push('-c', 'service_tier="priority"')
@@ -138,7 +142,8 @@ class CodexRuntime {
     return new Promise((resolve, reject) => {
       const threadKey = `${this.model.key}|${sessionId}`
       const resumeId = this.threads.get(threadKey)
-      const env = require('./runtime.cjs').browserEnv(cleanEnv(), this.browserContext)
+      const rt = require('./runtime.cjs')
+      const env = rt.injectEnv(rt.browserEnv(cleanEnv(), this.browserContext), this.pool.envFor ? this.pool.envFor('codex') : {})
       const proc = spawn(launch.cmd, [...launch.prefix, ...this.args(resumeId)], { cwd: this.browserContext?.projectDir || settings.workspace, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
       this.children.add(proc)
       let buf = '', last = '', failed = '', done = false, tail = ''

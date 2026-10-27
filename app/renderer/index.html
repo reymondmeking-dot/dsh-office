@@ -18,7 +18,7 @@
         <button class="tl min" id="btn-min" data-i18n-title="tb.min"></button>
         <button class="tl max" id="btn-max" data-i18n-title="tb.max"></button>
       </div>
-      <div class="brand"><span class="logo">▣</span> DSH Office <span class="app-version">1.4.0</span></div>
+      <div class="brand"><span class="logo">▣</span> DSH Office <span class="app-version">1.5.0</span></div>
     </div>
     <div id="status-pill" role="status" aria-live="polite" aria-atomic="true"><span class="dot"></span><span id="status-text" data-i18n="status.idle"></span></div>
     <div class="titlebar-actions">
@@ -196,7 +196,17 @@
           <div class="row"><span id="codex-msg" class="hint"></span></div>
         </div>
       </div>
-      <div class="group" id="cli-settings"><div class="row"><div class="sec-title" data-i18n="cli.title"></div><div class="spacer"></div><button id="cli-detect" class="pill-btn" data-i18n="cli.detect"></button></div><p class="hint" data-i18n="cli.hint"></p><div id="cli-list"></div><div class="row"><span id="cli-message" class="hint" role="status"></span><div class="spacer"></div><button id="cli-grant" class="pill-btn primary" data-i18n="cli.grant"></button></div></div>
+      <div class="group" id="cli-settings"><div class="row"><div class="sec-title" data-i18n="cli.title"></div><span id="cli-count" class="chip"></span><div class="spacer"></div><label class="cli-inline"><input type="checkbox" id="cli-missing" /><span data-i18n="cli.showMissing"></span></label><button id="cli-all" class="pill-btn" data-i18n="cli.selectAll"></button><button id="cli-detect" class="pill-btn" data-i18n="cli.detect"></button></div><p class="hint" data-i18n="cli.hint"></p><div id="cli-list"></div><div class="row cli-custom-row"><input id="cli-custom-id" data-i18n-ph="cli.customId" /><input id="cli-custom-path" data-i18n-ph="cli.customPath" /><button id="cli-custom-add" class="pill-btn" data-i18n="cli.addCustom"></button></div><div class="row"><span id="cli-message" class="hint" role="status"></span><div class="spacer"></div><button id="cli-grant" class="pill-btn primary" data-i18n="cli.grant"></button></div></div>
+      <div class="group" id="env-settings"><div class="row"><div class="sec-title" data-i18n="env.title"></div><span id="env-count" class="chip"></span><div class="spacer"></div><button id="env-clear" class="pill-btn" data-i18n="env.clear"></button><button id="env-scan" class="pill-btn primary" data-i18n="env.scan"></button></div><p class="hint" data-i18n="env.hint"></p><div id="env-list"></div><div class="row"><span id="env-message" class="hint" role="status"></span></div></div>
+      <div class="group" id="auto-settings"><div class="sec-title" data-i18n="auto.title"></div><p class="hint" data-i18n="auto.hint"></p>
+        <div class="grid2">
+          <label><span data-i18n="auto.askTimeout"></span><input id="set-ask-timeout" type="number" min="0" max="86400" /></label>
+          <label><span data-i18n="auto.retries"></span><input id="set-retries" type="number" min="0" max="5" /></label>
+          <label class="check-row"><input type="checkbox" id="set-resume" /><span data-i18n="auto.resume"></span></label>
+          <label class="check-row"><input type="checkbox" id="set-notify" /><span data-i18n="auto.notify"></span></label>
+          <label class="check-row"><input type="checkbox" id="set-network" /><span data-i18n="auto.network"></span></label>
+        </div>
+      </div>
       <div class="group" id="browser-settings">
         <div class="sec-title" data-i18n="browser.settings"></div>
         <p class="hint" data-i18n="browser.securityHint"></p>
@@ -234,7 +244,20 @@
         <textarea id="set-harness-text" rows="10" spellcheck="false"></textarea>
       </div>
     </div>
-    <div class="sheet-foot"><button id="set-about" class="pill-btn" data-i18n="about.title"></button><button class="pill-btn" data-setting-jump="cli-settings" data-i18n="cli.title"></button><span id="set-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+    <div class="sheet-foot"><button id="set-about" class="pill-btn" data-i18n="about.title"></button><button class="pill-btn" data-setting-jump="cli-settings" data-i18n="cli.title"></button><button class="pill-btn" data-setting-jump="env-settings" data-i18n="env.title"></button><button class="pill-btn" data-setting-jump="auto-settings" data-i18n="auto.title"></button><span id="set-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+  </div>
+</div>
+
+<!-- environment variable import -->
+<div id="env-modal" class="modal hidden">
+  <div class="sheet wide">
+    <div class="sheet-head"><div class="h1" data-i18n="env.pickTitle"></div><button class="x" data-close="env-modal">✕</button></div>
+    <div class="settings-body">
+      <div class="env-pick-tools"><input id="env-filter" type="search" autocomplete="off" data-i18n-ph="env.filter" /><label class="cli-inline"><input type="checkbox" id="env-only-secret" checked /><span data-i18n="env.onlySecret"></span></label><select id="env-scope"><option value="all" data-i18n="env.scopeAll"></option><option value="dsh" data-i18n="env.scopeDsh"></option><option value="codex" data-i18n="env.scopeCodex"></option></select></div>
+      <div id="env-pick" class="env-pick-list"></div>
+      <label><span data-i18n="env.paste"></span><textarea id="env-paste" rows="4" spellcheck="false" autocomplete="off"></textarea></label>
+    </div>
+    <div class="sheet-foot"><span id="env-pick-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="env-modal" data-i18n="set.cancel"></button><button id="env-import" class="pill-btn primary" data-i18n="env.import"></button></div>
   </div>
 </div>
 
@@ -398,7 +421,7 @@
 <section id="vault-modal" class="modal hidden" aria-labelledby="vault-heading"><div class="sheet vault-sheet"><div class="sheet-head"><div class="h1" id="vault-heading" data-i18n="vault.title"></div><div class="spacer"></div><button class="x" data-close="vault-modal">✕</button></div><div class="vault-body"><p class="hint" data-i18n="vault.hint"></p><div id="vault-status" class="hint" role="status"></div><div id="vault-sites"></div></div><div class="sheet-foot"><span class="hint" data-i18n="vault.exportHint"></span><div class="spacer"></div><button id="vault-export" class="pill-btn" data-i18n="vault.export"></button></div></div></section>
 <section id="browser-confirm-modal" class="modal hidden" aria-labelledby="browser-confirm-heading"><div class="sheet browser-confirm-sheet"><div class="sheet-head"><div class="h1" id="browser-confirm-heading"></div></div><div class="vault-body"><p id="browser-confirm-text"></p><code id="browser-confirm-origin"></code></div><div class="sheet-foot"><button id="browser-confirm-no" class="pill-btn" data-i18n="browser.deny"></button><button id="browser-confirm-yes" class="pill-btn primary" data-i18n="browser.allow"></button></div></div></section>
 
-<section id="about-modal" class="modal hidden" aria-labelledby="about-heading"><div class="sheet about-sheet"><div class="sheet-head"><div class="h1" id="about-heading" data-i18n="about.title"></div><div class="spacer"></div><button class="x" data-close="about-modal">✕</button></div><div class="about-content"><div class="about-version">DSH Office 1.4.0</div><p data-i18n="about.description"></p><div class="about-links"><a href="https://github.com/reymondmeking-dot/dsh-office" data-office-link="https://github.com/reymondmeking-dot/dsh-office" data-i18n="about.repo"></a><a href="https://planto-ai.com/" data-office-link="https://planto-ai.com/" data-i18n="about.website"></a></div><small class="hint" data-i18n="about.browser"></small></div></div></section>
+<section id="about-modal" class="modal hidden" aria-labelledby="about-heading"><div class="sheet about-sheet"><div class="sheet-head"><div class="h1" id="about-heading" data-i18n="about.title"></div><div class="spacer"></div><button class="x" data-close="about-modal">✕</button></div><div class="about-content"><div class="about-version">DSH Office 1.5.0</div><p data-i18n="about.description"></p><div class="about-links"><a href="https://github.com/reymondmeking-dot/dsh-office" data-office-link="https://github.com/reymondmeking-dot/dsh-office" data-i18n="about.repo"></a><a href="https://planto-ai.com/" data-office-link="https://planto-ai.com/" data-i18n="about.website"></a></div><small class="hint" data-i18n="about.browser"></small></div></div></section>
 <!-- project organization and explicit folder confirmation -->
 <section id="project-modal" class="modal hidden" aria-labelledby="project-heading">
   <div class="sheet wide project-sheet">

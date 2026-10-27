@@ -419,10 +419,17 @@
       list.appendChild(d)
     })
     $('#ask-modal').classList.remove('hidden')
+    clearInterval(askTimer); $('#ask-countdown')?.remove()
+    if (ev.deadline) {
+      const cd = document.createElement('div'); cd.id = 'ask-countdown'; cd.className = 'ask-countdown'; $('#ask-sub').after(cd)
+      const tick = () => { const s = Math.max(0, Math.round((ev.deadline - Date.now()) / 1000)); cd.textContent = t('auto.countdown', { s }); if (!s) clearInterval(askTimer) }
+      tick(); askTimer = setInterval(tick, 1000)
+    }
     O.handlers.say({ id: 'ceo', text: t('bubble.ask'), ms: 4000 })
     setTimeout(() => list.querySelector('textarea')?.focus(), 60)
   }
-  function hideAsk() { ask = null; document.body.classList.remove('asking'); $('#ask-modal').classList.add('hidden') }
+  let askTimer = null
+  function hideAsk() { clearInterval(askTimer); $('#ask-countdown')?.remove(); ask = null; document.body.classList.remove('asking'); $('#ask-modal').classList.add('hidden') }
   $('#ask-submit').onclick = () => { if (!ask) return hideAsk(); api.answer([...document.querySelectorAll('#ask-list textarea')].map(x => x.value.trim())) }
   $('#ask-skip').onclick = () => api.answer(null)
   $('#ask-later').onclick = () => $('#ask-modal').classList.add('hidden')
@@ -1458,6 +1465,7 @@
         defaultModel: $('#set-default').value,
         defaultEffort: $('#set-effort').value,
         compaction,
+        ...(window.OfficeAutopilot ? window.OfficeAutopilot.read() : {}),
       })
       renderFruits(); O.setModels(settings.models)
       data = await api.init(); for (const a of data.agents) { agents.set(a.id, a); O.updateAgent(a) }
