@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('office', {
   saveProvider: (route, p, key, models) => ipcRenderer.invoke('office:saveProvider', route, p, key, models),
   deleteProvider: route => ipcRenderer.invoke('office:deleteProvider', route),
   projects: () => ipcRenderer.invoke('office:projects'),
+  stopProject: id => ipcRenderer.invoke('office:stopProject', id),
+  projectActivity: id => ipcRenderer.invoke('office:projectActivity', id),
   taskLocation: input => ipcRenderer.invoke('office:taskLocation', input),
   projectPreview: input => ipcRenderer.invoke('office:projectPreview', input),
   createProject: input => ipcRenderer.invoke('office:createProject', input),

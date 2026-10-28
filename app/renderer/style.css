@@ -78,7 +78,7 @@
   --dark-blue: #80b6ff;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); color: var(--text); background: #1d1f27; user-select: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); color: var(--text); background: var(--surface-page); user-select: none; }
 button { font-family: inherit; cursor: pointer; }
 input, textarea, select { font-family: inherit; font-size: var(--text-body); color: var(--text); background: var(--surface-control); border: 1px solid var(--line); border-radius: var(--radius-control); padding: var(--space-2) var(--space-2-5); outline: none; transition: border var(--duration-ui), box-shadow var(--duration-ui); user-select: text; }
 input:focus, textarea:focus, select:focus { border-color: var(--blue); box-shadow: var(--focus-ring); }
@@ -153,9 +153,9 @@ body.asking #titlebar #btn-ask { animation: none; background: var(--warning-soft
 .lang-btn { min-width: 38px; padding: 7px var(--space-2-5); font-weight: 700; letter-spacing: .3px; }
 
 /* ---------- stage ---------- */
-#stage { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 30%, #2c3040, #16181f); overflow: hidden; }
-#office { image-rendering: pixelated; border-radius: var(--radius-md); box-shadow: 0 30px 80px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06); }
-body.rush #stage { background: radial-gradient(ellipse at 50% 30%, #4a3d12, #1a160a); }
+#stage { position: fixed; top: var(--titlebar-height); left: 0; right: 0; bottom: 0; display: grid; place-items: center; background: var(--surface-page); overflow: hidden; }
+#office { image-rendering: pixelated; border-radius: 0; box-shadow: none; }
+body.rush #stage { background: var(--warning-soft); }
 #bubbles { position: absolute; inset: 0; pointer-events: none; }
 .bubble {
   position: absolute; transform: translate(-50%, -100%); max-width: 260px; padding: 7px var(--space-3); border-radius: var(--radius-card); font-size: var(--text-lead); font-weight: 500; line-height: 1.45; -webkit-font-smoothing: antialiased; border: 1px solid rgba(0,0,0,.08);

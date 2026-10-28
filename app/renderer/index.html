@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="browser.css" />
 <link rel="stylesheet" href="projects.css" />
 <link rel="stylesheet" href="resources.css" />
+<link rel="stylesheet" href="shell.css" />
 </head>
 <body>
 <header id="titlebar">
@@ -23,10 +24,16 @@
     <div id="status-pill" role="status" aria-live="polite" aria-atomic="true"><span class="dot"></span><span id="status-text" data-i18n="status.idle"></span></div>
     <div class="titlebar-actions">
       <button id="btn-ask" class="pill-btn" data-i18n="btn.ask" data-i18n-title="btn.ask.title"></button>
+      <button id="btn-stop-current" class="pill-btn danger hidden" data-i18n="shell.stopProject"></button>
       <button id="btn-new" class="pill-btn primary" data-i18n="btn.new"></button>
       <button id="btn-lang" class="pill-btn lang-btn" data-i18n="lang.switch" title="English / 中文"></button>
-      <button id="btn-ext" class="icon-btn" data-i18n-title="btn.ext.title">🧩</button>
-      <button id="btn-settings" class="icon-btn" data-i18n-title="btn.settings.title">⚙️</button>
+      <button id="btn-more" class="pill-btn more-trigger" aria-haspopup="menu" aria-controls="office-more-menu" aria-expanded="false"><span data-i18n="shell.more"></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+      <div id="office-more-menu" class="action-menu hidden" role="menu">
+        <button id="btn-settings" class="menu-item" role="menuitem" data-i18n="settings.head"></button>
+        <button id="btn-ext" class="menu-item" role="menuitem" data-i18n="ext.head"></button>
+        <button id="btn-resources" class="menu-item" role="menuitem" data-i18n="cli.title"></button>
+        <button id="btn-about" class="menu-item" role="menuitem" data-i18n="about.title"></button>
+      </div>
     </div>
   </div>
   <div class="titlebar-workspace">
@@ -43,12 +50,16 @@
       </button>
     </nav>
     <div class="office-controls">
+      <button id="btn-work-mode" class="pill-btn more-trigger" aria-haspopup="true" aria-controls="work-mode-menu" aria-expanded="false"><span data-i18n="shell.workMode"></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+      <div id="work-mode-menu" class="action-menu work-mode-menu hidden">
+      <div class="work-mode-heading"><strong data-i18n="shell.workMode"></strong><span class="hint" data-i18n="shell.modelHint"></span></div>
       <div id="fruit-tray" data-i18n-title="tray.title">
         <span class="tray-label" data-i18n="tray.label"></span>
         <div id="fruits" tabindex="0" role="group"></div>
       </div>
       <div id="effort-pill" data-i18n-title="effort.pill.title"><span aria-hidden="true">🧠</span><select id="top-effort"></select></div>
       <button id="btn-rush" class="pill-btn rush" data-i18n="btn.rush" data-i18n-title="btn.rush.title"></button>
+      </div>
     </div>
   </div>
 </header>
@@ -115,10 +126,12 @@
       <div class="h1" id="chat-title"></div>
       <select id="chat-proj" data-i18n-title="chat.pickProject"></select>
       <div class="spacer"></div>
-      <button id="chat-folder" class="pill-btn" data-i18n="chat.openFolder"></button>
+      <button id="chat-stop" class="pill-btn danger hidden" data-i18n="shell.stopProject"></button>
+      <button id="chat-more" class="pill-btn more-trigger" aria-haspopup="menu" aria-controls="chat-more-menu" aria-expanded="false" data-i18n="shell.more"></button>
+      <div id="chat-more-menu" class="action-menu hidden" role="menu"><button id="chat-references" class="menu-item" role="menuitem" data-i18n="chat.references"></button><button id="chat-folder" class="menu-item" role="menuitem" data-i18n="chat.openFolder"></button></div>
       <button class="x" data-close="chat-modal">✕</button>
     </div>
-    <div class="chat-context-bar"><span class="hint" data-i18n="chat.conversation"></span><select id="chat-conversation"></select><button id="chat-new-conversation" class="pill-btn" data-i18n="chat.newConversation"></button><button id="chat-references" class="pill-btn" data-i18n="chat.references"></button><span id="chat-location"></span></div>
+    <div class="chat-context-bar"><span class="hint" data-i18n="chat.conversation"></span><select id="chat-conversation"></select><button id="chat-new-conversation" class="pill-btn" data-i18n="chat.newConversation"></button><span id="chat-location"></span></div>
     <div class="chat-main">
       <div class="chat-col">
         <div id="chat-log"></div>
@@ -167,7 +180,8 @@
 <div id="settings-modal" class="modal hidden">
   <div class="sheet wide">
     <div class="sheet-head"><div class="h1" data-i18n="settings.head"></div><button class="x" data-close="settings-modal">✕</button></div>
-    <nav class="settings-jumps" aria-label="Settings"><button class="pill-btn" data-setting-jump="set-workspace" data-i18n="ctx.navGeneral"></button><button class="pill-btn" data-setting-jump="set-providers-section" data-i18n="ctx.navModels"></button><button class="pill-btn" data-setting-jump="context-settings" data-i18n="ctx.navContext"></button><button class="pill-btn" data-setting-jump="browser-settings" data-i18n="browser.title"></button><button class="pill-btn" id="set-vault" data-i18n="vault.title"></button><button class="pill-btn" data-setting-jump="set-harness-section" data-i18n="ctx.navHarness"></button></nav>
+    <div class="settings-layout">
+    <nav class="settings-jumps" data-i18n-title="settings.head"><button class="pill-btn" data-setting-jump="set-workspace" data-i18n="ctx.navGeneral"></button><button class="pill-btn" data-setting-jump="set-providers-section" data-i18n="ctx.navModels"></button><button class="pill-btn" data-setting-jump="cli-settings" data-i18n="cli.title"></button><button class="pill-btn" data-setting-jump="env-settings" data-i18n="env.title"></button><button class="pill-btn" data-setting-jump="auto-settings" data-i18n="auto.title"></button><button class="pill-btn" data-setting-jump="context-settings" data-i18n="ctx.navContext"></button><button class="pill-btn" data-setting-jump="browser-settings" data-i18n="browser.title"></button><button class="pill-btn" id="set-vault" data-i18n="vault.title"></button><button class="pill-btn" data-setting-jump="set-harness-section" data-i18n="ctx.navHarness"></button><button id="set-about" class="pill-btn" data-i18n="about.title"></button></nav>
     <div class="settings-body">
       <div class="group">
         <div class="sec-title" data-i18n="set.files"></div>
@@ -244,7 +258,8 @@
         <textarea id="set-harness-text" rows="10" spellcheck="false"></textarea>
       </div>
     </div>
-    <div class="sheet-foot"><button id="set-about" class="pill-btn" data-i18n="about.title"></button><button class="pill-btn" data-setting-jump="cli-settings" data-i18n="cli.title"></button><button class="pill-btn" data-setting-jump="env-settings" data-i18n="env.title"></button><button class="pill-btn" data-setting-jump="auto-settings" data-i18n="auto.title"></button><span id="set-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
+    </div>
+    <div class="sheet-foot"><span id="set-msg" class="hint" role="status"></span><div class="spacer"></div><button class="pill-btn" data-close="settings-modal" data-i18n="set.cancel"></button><button id="set-save" class="pill-btn primary" data-i18n="set.save"></button></div>
   </div>
 </div>
 
@@ -283,7 +298,7 @@
       </div>
       <div class="ext-pane hidden" data-pane="skills">
         <div class="group">
-          <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.skills"></div><div class="spacer"></div><button id="ext-skill-folder" class="pill-btn" data-i18n="ext.openSkillDir"></button><button id="ext-skill-reload" class="pill-btn" data-i18n="ext.skillReload"></button><button id="ext-skill-import" class="pill-btn" data-i18n="ext.skillImport"></button><button id="ext-skill-add" class="pill-btn primary" data-i18n="ext.skillAdd"></button></div>
+          <div class="row"><div class="sec-title" style="margin:0" data-i18n="ext.skills"></div><div class="spacer"></div><button id="ext-skill-import" class="pill-btn" data-i18n="ext.skillImport"></button><button id="ext-skill-add" class="pill-btn primary" data-i18n="ext.skillAdd"></button><button id="ext-skill-more" class="pill-btn more-trigger" aria-haspopup="menu" aria-controls="skill-more-menu" aria-expanded="false" data-i18n="shell.more"></button><div id="skill-more-menu" class="action-menu hidden" role="menu"><button id="ext-skill-folder" class="menu-item" role="menuitem" data-i18n="ext.openSkillDir"></button><button id="ext-skill-reload" class="menu-item" role="menuitem" data-i18n="ext.skillReload"></button></div></div>
           <div class="hint" data-i18n-html="ext.skillsHint"></div>
           <div id="ext-skills"></div>
         </div>
@@ -430,7 +445,7 @@
       <aside class="project-sidebar"><input id="project-search" type="search" autocomplete="off" data-i18n-ph="projects.search" data-i18n-title="projects.search" /><div id="project-list" data-i18n-title="projects.list"></div></aside>
       <div id="project-detail-empty" class="project-empty-stage"><h2 data-i18n="projects.emptyTitle"></h2><p data-i18n="projects.emptyText"></p><button id="project-empty-new" class="pill-btn primary" data-i18n="projects.new"></button></div>
       <article id="project-detail" class="project-detail hidden">
-        <div class="project-detail-head"><div><button id="project-back-parent" class="pill-btn mini hidden" data-i18n="projects.backParent"></button></div><div class="project-title-row"><h2 id="project-name"></h2><span id="project-status" class="chip"></span></div><div class="project-path-row"><div id="project-folder-path"></div><button id="project-reveal" class="pill-btn mini" data-i18n="projects.reveal"></button></div></div>
+        <div class="project-detail-head"><div class="project-detail-top"><div class="project-heading-copy"><button id="project-back-parent" class="pill-btn mini hidden" data-i18n="projects.backParent"></button><div class="project-title-row"><h2 id="project-name"></h2><span id="project-status" class="chip"></span></div></div><div class="project-detail-actions"><button id="project-stop" class="pill-btn danger" data-i18n="projects.stop"></button><button id="project-more" class="pill-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="project-more-menu" data-i18n="projects.more"></button><div id="project-more-menu" class="action-menu hidden" role="menu"><button id="project-reveal" class="menu-item" role="menuitem" data-i18n="projects.reveal"></button></div></div></div><div class="project-path-row"><div id="project-folder-path"></div></div><p id="project-activity" class="hint"></p></div>
         <div class="project-detail-scroll">
           <section class="project-section"><div class="project-section-head"><h2 data-i18n="projects.conversations"></h2><span id="project-conversation-count" class="hint"></span><div class="spacer"></div><button id="project-conversation-new" class="pill-btn primary mini" data-i18n="projects.newConversation"></button></div>
             <form id="project-conversation-form" class="project-inline-form hidden"><label><span data-i18n="projects.conversationTitle"></span><input id="project-conversation-title" maxlength="100" required data-i18n-ph="projects.conversationPh" /></label><details><summary data-i18n="projects.references"></summary><p class="hint" data-i18n="projects.referenceHint"></p><div id="project-conversation-sources" class="project-reference-list"></div></details><p id="project-conversation-message" class="hint" role="status"></p><div class="sheet-foot"><button type="button" id="project-conversation-cancel" class="pill-btn" data-i18n="projects.cancel"></button><button id="project-conversation-create" type="submit" class="pill-btn primary" data-i18n="projects.createConversation"></button></div></form>
@@ -460,6 +475,7 @@
 <script src="resources-i18n.js"></script>
 <script src="browser-i18n.js"></script>
 <script src="projects-i18n.js"></script>
+<script src="shell.js"></script>
 <script src="titlebar.js"></script>
 <script src="sprites.js"></script>
 <script src="office.js"></script>

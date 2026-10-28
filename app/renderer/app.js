@@ -40,22 +40,27 @@
   let settings = data.settings
   let projects = data.projects
   const agents = new Map(data.agents.map(a => [a.id, a]))
+  let chat = null // Selected project conversation; initialized before live status updates.
+  const chatSending = new Set()
 
   // ---------- canvas ----------
+  const overlay = new Map()
   const canvas = $('#office'), ctx = canvas.getContext('2d', { alpha: false }), stage = $('#stage')
   O.setLang(lang)
   S.snap(ctx)
   let scale = 3, devK = 3
   function fit() {
     const dpr = window.devicePixelRatio || 1
-    const w = stage.clientWidth - 24, h = stage.clientHeight - 24
-    // integer device pixels per world pixel*2 (half-pixel art stays crisp)
-    devK = Math.max(2, Math.floor(Math.min(w / O.PW, h / O.PH) * dpr * 2) / 2)
-    scale = devK / dpr
+    const w = stage.clientWidth, h = stage.clientHeight
+    // Fit the whole office. Render on a snapped pixel grid, then present it with
+    // nearest-neighbour scaling so fixed zoom steps do not leave wide gutters.
+    scale = Math.min(w / O.PW, h / O.PH)
+    devK = Math.max(2, Math.ceil(scale * dpr * 2) / 2)
     canvas.width = Math.round(O.PW * devK); canvas.height = Math.round(O.PH * devK)
-    canvas.style.width = `${canvas.width / dpr}px`; canvas.style.height = `${canvas.height / dpr}px`
+    canvas.style.width = `${O.PW * scale}px`; canvas.style.height = `${O.PH * scale}px`
     ctx.__s = devK; ctx.setTransform(devK, 0, 0, devK, 0, 0); ctx.imageSmoothingEnabled = false
     O.setDeviceScale(devK)
+    for (const o of overlay.values()) o.bubbleHeight = 0
   }
   window.addEventListener('resize', fit); fit()
   matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.('change', fit)
@@ -88,7 +93,6 @@
 
   // ---------- overlays (bubbles, name tags) ----------
   const bubbleLayer = $('#bubbles')
-  const overlay = new Map()
   function toScreen(x, y) {
     const r = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect()
     return [r.left - sr.left + x * (r.width / O.PW), r.top - sr.top + y * (r.height / O.PH)]
@@ -109,9 +113,11 @@
       o.tag.textContent = c.name
       o.tag.style.left = `${tx}px`; o.tag.style.top = `${ty}px`; o.tag.style.opacity = c.alpha
       if (c.bubble) {
-        if (o.bub.textContent !== c.bubble.text) { o.bub.textContent = c.bubble.text; o.bub.style.animation = 'none'; void o.bub.offsetWidth; o.bub.style.animation = '' }
+        if (o.bub.textContent !== c.bubble.text) { o.bub.textContent = c.bubble.text; o.bub.style.animation = 'none'; void o.bub.offsetWidth; o.bub.style.animation = ''; o.bubbleHeight = 0 }
         o.bub.className = `bubble ${c.role === 'ceo' ? 'ceo' : ''} ${O.isRush() && c.role !== 'ceo' ? 'rush' : ''}`
-        o.bub.style.display = ''; o.bub.style.left = `${sx}px`; o.bub.style.top = `${sy - 4}px`
+        o.bub.style.display = ''; o.bub.style.left = `${sx}px`
+        if (!o.bubbleHeight) o.bubbleHeight = o.bub.offsetHeight
+        o.bub.style.top = `${Math.max(o.bubbleHeight + 8, sy - 4)}px`
       } else o.bub.style.display = 'none'
       const icon = c.bubble ? '' : c.status === 'busy' ? (O.isRush() ? '🔥' : '💭') : c.status === 'reporting' ? '📣' : c.hiring ? '📇' : ''
       o.ico.textContent = icon; o.ico.style.display = icon ? '' : 'none'
@@ -146,13 +152,28 @@
     clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.add('hidden'), ms)
   }
   function setStatus() {
-    const cur = projects.find(p => !['done', 'failed'].includes(p.status) && p.status !== 'queued')
+    const cur = projects.find(p => !['done', 'failed', 'stopped', 'queued'].includes(p.status))
     const queued = projects.filter(p => p.status === 'queued').length
     $('#status-pill').classList.toggle('busy', !!cur)
     $('#status-text').textContent = cur
       ? t('status.busy', { title: cur.title, phase: tp(cur.phase) }) + (queued ? t('status.queued', { n: queued }) : '')
       : t('status.idle')
     $('#status-pill').title = $('#status-text').textContent
+    updateStopControls()
+  }
+  function updateStopControls() {
+    const stoppable = p => p.activity?.canStop || p.activity?.stopping
+    const active = projects.find(p => stoppable(p) && !p.parentProjectId) || projects.find(stoppable)
+    const stop = $('#btn-stop-current')
+    stop.classList.toggle('hidden', !active); stop.disabled = !!active?.activity?.stopping
+    stop.textContent = t(active?.activity?.stopping ? 'shell.stopping' : 'shell.stopProject')
+    stop.title = active?.title || ''; stop.onclick = () => active && window.OfficeProjects?.requestStop(active.id)
+    const chatStop = $('#chat-stop')
+    if (chatStop) {
+      const p = projects.find(p => p.id === chat?.id), busy = !!p?.activity?.canStop || !!p?.activity?.stopping || !!chat && chatSending.has(chat.id)
+      chatStop.classList.toggle('hidden', !busy); chatStop.disabled = !!p?.activity?.stopping
+      chatStop.textContent = t(p?.activity?.stopping ? 'shell.stopping' : 'shell.stopProject')
+    }
   }
   setStatus()
 
@@ -162,9 +183,10 @@
     const h = O.handlers[ev.type]
     if (h) h(ev)
     switch (ev.type) {
+      case 'project-activity': projects = ev.projects; O.setProjects(projects); setStatus(); break
       case 'project': {
         const i = projects.findIndex(p => p.id === ev.project.id)
-        if (i >= 0) projects[i] = ev.project; else projects.unshift(ev.project)
+        if (i >= 0) projects[i] = { ...projects[i], ...ev.project }; else projects.unshift(ev.project)
         O.setProjects(projects); setStatus()
         if (ev.project.status === 'meeting') O.setMeetingTitle(ev.project.title)
         if (ev.project.status === 'done') { O.setMeetingTitle(''); ticker(t('tick.archived', { title: esc(ev.project.title) }), 10000) }
@@ -497,7 +519,7 @@
     $('#task-project').innerHTML = `<option value="">${esc(t('task.standalone'))}</option>` + projects.filter(p => p.kind === 'workspace').map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('')
     updateTaskLocation()
     const sel = $('#task-continue'); sel.innerHTML = `<option value="">${t('task.fresh')}</option>`
-    for (const p of projects.filter(p => p.status === 'done' || p.status === 'failed' || p.status === 'integrating')) {
+    for (const p of projects.filter(p => ['done', 'failed', 'stopped', 'integrating'].includes(p.status))) {
       const o = document.createElement('option'); o.value = p.id
       o.textContent = p.status === 'done'
         ? t('task.contOptDone', { title: p.title, date: new Date(p.createdAt).toLocaleDateString() })
@@ -517,7 +539,7 @@
     try { p = await api.submit({ title, brief: $('#task-brief').value.trim(), rush: $('#task-rush').checked, continueOf: $('#task-continue').value || null, projectId: $('#task-project').value || null, location: taskLocation, locationConfirmed: true, attachments: atts.map(a => a.path) }) } finally { btn.disabled = false; btn.textContent = t('task.submit') }
     $('#task-modal').classList.add('hidden'); $('#task-title').value = ''; $('#task-brief').value = ''; atts = []; renderAtts()
     const bad = (p.attachments || []).filter(a => a.error); if (bad.length) toast(t('task.attFailToast', { n: bad.length, names: andJoin(bad.map(a => a.name)) }), 5000)
-    if (p.status === 'queued' && projects.some(x => x.id !== p.id && !['done', 'failed', 'queued'].includes(x.status))) toast(t('task.queued'))
+    if (p.status === 'queued' && projects.some(x => x.id !== p.id && !['done', 'failed', 'stopped', 'queued'].includes(x.status))) toast(t('task.queued'))
   }
   $('#task-title').addEventListener('keydown', e => { if (e.key === 'Enter') $('#task-brief').focus() })
 
@@ -538,7 +560,7 @@
         const color = O.BOOK_COLORS[(p.color ?? 0) % O.BOOK_COLORS.length]
         b.style.background = `linear-gradient(90deg, ${S.shade(color, -0.15)}, ${color} 30%, ${S.shade(color, 0.12)})`
         b.style.height = `${120 + ((p.title.length * 7) % 22)}px`
-        const st = p.status === 'done' ? '✓' : p.status === 'failed' ? '✕' : '…'
+        const st = p.status === 'done' ? '✓' : p.status === 'failed' ? '✕' : p.status === 'stopped' ? '■' : '…'
         b.innerHTML = `<div class="band t"></div><div class="spine">${esc(p.title)}</div><div class="band b"></div><div class="st">${st}</div>`
         b.title = `${p.title}\n${new Date(p.createdAt).toLocaleString()}\n${tp(p.phase)}`
         b.onclick = () => openBook(p.id)
@@ -593,9 +615,7 @@
   $('#bv-back').onclick = () => { $('#book-view').classList.add('hidden'); $('#bookcase').classList.remove('hidden'); renderBookcase() }
 
   // ---------- project chat (talk to the CEO with context; click deliverables to read) ----------
-  let chat = null // { id, title, status, messages, products, sel }
-  const chatSending = new Set()
-  const chatable = () => projects.filter(p => ['done', 'failed'].includes(p.status))
+  const chatable = () => projects.filter(p => ['done', 'failed', 'stopped'].includes(p.status))
   const ceoName = () => agents.get('ceo')?.name || 'CEO'
   const flatProducts = pr => [pr?.summary, ...(pr?.main || []), ...(pr?.others || [])].filter(Boolean)
   const kb = n => n > 1024 ? `${(n / 1024).toFixed(1)}K` : `${n}B`
@@ -611,7 +631,7 @@
     return all.find(f => f.rel === r) || all.find(f => r.endsWith('/' + f.rel)) || all.find(f => f.rel.endsWith('/' + r)) || all.find(f => base(f.rel) === base(r)) || null
   }
   function fillChatProjects(list, sel) {
-    $('#chat-proj').innerHTML = list.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? 'selected' : ''}>${p.status === 'failed' ? '✕ ' : '✓ '}${esc(p.title)}</option>`).join('')
+    $('#chat-proj').innerHTML = list.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? 'selected' : ''}>${p.status === 'failed' ? '✕ ' : p.status === 'stopped' ? '■ ' : '✓ '}${esc(p.title)}</option>`).join('')
   }
   async function openChat(id, conversationId = 'default') {
     projects = await api.projects(); O.setProjects(projects)
@@ -642,6 +662,7 @@
     renderChatLog(true); renderChatSide()
     const busy = chatSending.has(chat.id) || chat.busy
     $('#chat-send').disabled = busy; $('#chat-text').disabled = false
+    updateStopControls()
   }
   function msgHtml(m) {
     if (m.role === 'user') return `<div class="msg me"><div class="who">${esc(t('chat.you'))}</div><div class="bub">${esc(m.text).replace(/\n/g, '<br>')}</div></div>`
@@ -702,6 +723,12 @@
     setChatStatus(t('chat.thinking', { name: ceoName() }))
     try {
       const r = await api.chatSend(pid, text, cid)
+      if (r.stopped) {
+        if (chat?.id === pid && (chat.conversationId || 'default') === cid) {
+          const history = await api.chatHistory(pid, cid); chat = { ...history, sel: null }; renderChat(); toast(t('shell.stopped'))
+        }
+        return
+      }
       if (chat?.id === pid && (chat.conversationId || 'default') === cid) {
         chat.messages.push(r.message); chat.products = r.products
         const sel = chat.sel && flatProducts(r.products).find(f => f.rel === chat.sel.rel)
@@ -712,6 +739,7 @@
       if (chat?.id === pid && (chat.conversationId || 'default') === cid) { chat.messages.push({ role: 'ceo', text: t('chat.sendFail', { error: errText(e) }), at: Date.now(), error: true }); renderChatLog(true) }
     } finally {
       chatSending.delete(pid)
+      updateStopControls()
       if (chat?.id === pid) { setChatStatus(''); $('#chat-send').disabled = false; $('#chat-text').focus() }
     }
   }
@@ -724,6 +752,8 @@
   $('#bv-chat').onclick = () => { if (bookId) { $('#archive-modal').classList.add('hidden'); openChat(bookId) } }
   $('#chat-proj').onchange = e => loadChat(e.target.value)
   $('#chat-send').onclick = sendChat
+  $('#chat-stop').onclick = () => chat && window.OfficeProjects?.requestStop(chat.id)
+  document.addEventListener('office:project-stop-result', e => toast(e.detail.message, e.detail.error ? 6000 : 4000))
   $('#chat-text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat() } })
   $('#cp-back').onclick = () => { if (chat) chat.sel = null; $('#chat-side-view').classList.add('hidden'); $('#chat-side-list').classList.remove('hidden'); renderChatSide() }
   $('#chat-folder').onclick = () => { const p = projects.find(x => x.id === chat?.id); if (p) api.open(p.dir) }
@@ -757,6 +787,7 @@
     renderProviders()
     renderContextBudget()
     renderCodex(); scanCodex()
+    if (focusHarness) window.OfficeShell?.selectSettings('set-harness-section')
   }
   const tokenText = n => Number(n) > 0 ? Number(n).toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN') : t('ctx.unknown')
   const sourceText = source => source ? t('ctx.source.' + source) : t('ctx.unknown')

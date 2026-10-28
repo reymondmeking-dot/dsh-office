@@ -22,6 +22,20 @@ A pixel-office desktop UI over **DeepSeek Harness (DSH)**. Give the CEO a task; 
 
 > 演示视频与截图仍为 1.4.0 界面；1.5.0 新增的设置区截图见下文。/ The demo video and screenshots show the 1.4.0 UI; 1.5.0 settings screenshots are below.
 
+**本次界面更新 / Latest layout update**：项目详情和运行中的对话提供「停止项目」，确认后取消该项目及子任务、排队任务和生成中的回复，保留文件与历史。已主动停止的任务不会在重启后自动续跑。标题栏保留主要入口，次要操作收入「更多」菜单；模型与工作模式按需展开，设置按左侧类别切换。
+
+Project details and active conversations now offer **Stop project**. Confirmation cancels that project's running and queued child tasks and active replies while preserving files and history. Explicitly stopped tasks do not resume automatically after restart. Primary actions stay visible, secondary actions use More menus, model controls open on demand, and Settings uses a category sidebar.
+
+办公室四周使用浅色背景，画面等比适配可用空间，去掉黑边和深色阴影。/ The office uses a light surrounding surface and fits the available space without cropping, dark gutters or heavy shadows.
+
+| 当前办公室 / Current office | 项目与停止操作 / Projects and stop |
+|---|---|
+| ![最新办公室排版](docs/images/v1.5.0-layout-office-zh.png) | ![项目停止确认](docs/images/v1.5.0-layout-stop-en.png) |
+
+![设置分类导航 / Settings category navigation](docs/images/v1.5.0-layout-settings-zh.png)
+
+以上为隔离数据、无头捕获的当前界面；上方视频仍标记为 1.4.0 导览。/ These current UI captures use isolated data and headless execution. The video above remains labeled as the 1.4.0 tour.
+
 **1.4.0**：[项目与多对话](#项目多对话与成果引用--projects-conversations--references) · [浏览器与文件预览](#浏览器文件预览与本地密码--browser-file-previews--local-passwords) · [本机 CLI 资源](#本机-cli-资源--local-cli-resources)
 
 **1.4.0**: [Projects & conversations](#项目多对话与成果引用--projects-conversations--references) · [Browser & file previews](#浏览器文件预览与本地密码--browser-file-previews--local-passwords) · [Local CLI resources](#本机-cli-资源--local-cli-resources)
@@ -335,7 +349,7 @@ Open the 🧩 Extensions center from the title bar:
 离线回归 / Offline regression:
 
 ```powershell
-node --test scripts/parameters.test.cjs scripts/extensions.test.cjs scripts/test-providers.cjs scripts/office-browser.test.cjs scripts/browser-backend.test.cjs scripts/projects.test.cjs scripts/cli-resources.test.cjs
+node --test scripts/parameters.test.cjs scripts/extensions.test.cjs scripts/test-providers.cjs scripts/office-browser.test.cjs scripts/browser-backend.test.cjs scripts/projects.test.cjs scripts/cli-resources.test.cjs scripts/env-store.test.cjs scripts/project-runs.test.cjs
 ```
 
 使用 fixtures 验证现有参数、扩展、服务商，以及密码库加密与拒绝明文后端、工作区越界 / 链接、URL 策略、搜索解析、MCP schema / 连接 / 双引擎接线、密码脱敏、项目目录确认与拒覆盖、独立对话 / 来源引用、CLI 只读参数与授权撤销；不调用真实模型服务商。/ Fixture-based tests cover existing parameters, extensions and providers, vault encryption and refusal of plaintext backends, workspace traversal / links, URL policy, search parsing, MCP schemas / connection / dual-engine wiring, secret redaction, project location confirmation / overwrite refusal, separate conversations / source references, and CLI read-only arguments / authorization revocation. They do not call a live model provider.
@@ -344,6 +358,8 @@ node --test scripts/parameters.test.cjs scripts/extensions.test.cjs scripts/test
 
 ```powershell
 # 本地验收脚本 / Local acceptance scripts (Node.js 22+)
+node scripts/project-stop-e2e.mjs   # 真实 Electron IPC、进程树与停止确认；固定模型协议夹具，不读取凭据 / Real Electron IPC, process trees and stop confirmation with a deterministic CLI fixture; no credentials
+node scripts/ui-layout-check.mjs after # 中英双语，两档尺寸，弹出菜单键盘与布局 / Two languages, two sizes, menu keyboard behavior and layout
 node tmp/v15-e2e.mjs        # 1.5: CLI 扫描 / 授权、环境变量导入 / 注入 / 遮蔽、自动驾驶设置（不调用模型）/ CLI scan & grants, env import / injection / redaction, autopilot settings (no model calls)
 node tmp/env-plugin-check.mjs  # DSH shell 是否收到导入的 *_KEY 变量 / whether DSH shells receive imported *_KEY variables
 node tmp/browser-e2e.mjs dsh

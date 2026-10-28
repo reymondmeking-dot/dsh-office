@@ -23,6 +23,14 @@
     'projects.unavailableSource': ['来源已不可用：{id}','Source is unavailable: {id}'], 'projects.removeUnavailable': ['可取消勾选以移除失效引用。','Uncheck to remove an unavailable reference.'],
     'projects.files': ['项目成果','Project files'], 'projects.filesEmpty': ['暂无成果文件。可以在对话中安排工作。','No output files yet. Start work in a conversation.'],
     'projects.tasks': ['项目任务','Project tasks'], 'projects.viewTask': ['查看任务','View task'], 'projects.cancel': ['取消','Cancel'],
+    'projects.more': ['更多','More'], 'projects.conversationMore': ['「{title}」的更多操作','More actions for “{title}”'],
+    'projects.stop': ['停止项目','Stop project'], 'projects.stopping': ['正在停止…','Stopping…'],
+    'projects.stopHint': ['停止本项目的任务、下属任务和正在生成的对话','Stop this project’s tasks, child tasks and active conversations'],
+    'projects.noActivity': ['当前没有正在运行的任务或对话','No tasks or conversations are running'],
+    'projects.activity': ['运行任务 {tasks} · 排队 {queued} · 对话生成 {chats}','{tasks} running tasks · {queued} queued · {chats} active chats'],
+    'projects.stopTitle': ['停止这个项目？','Stop this project?'], 'projects.confirmStop': ['确认停止','Confirm stop'],
+    'projects.stopDescription': ['将取消本项目及下属任务的执行，并中止正在生成的对话。已经保存的文件和历史对话会保留。','Cancel execution for this project and its child tasks, and stop active conversation replies. Saved files and conversation history will be kept.'],
+    'projects.stopSuccess': ['「{title}」的运行已停止，文件和历史对话已保留。','Stopped “{title}”. Saved files and conversation history were kept.'],
     'projects.loading': ['正在读取项目…','Loading projects…'], 'projects.loadFiles': ['正在读取成果…','Loading files…'],
     'projects.error': ['操作失败：{message}','Action failed: {message}'], 'projects.needTitle': ['请填写项目名称。','Enter a project name.'],
     'projects.needConversationTitle': ['请填写对话名称。','Enter a conversation name.'], 'projects.unavailable': ['项目管理接口不可用，请使用最新版本重新打开。','Project management is unavailable. Reopen the latest app version.'],
@@ -34,7 +42,7 @@
     'projects.checkingFolder': ['正在检查文件夹…','Checking folder…'], 'projects.confirmCreate': ['确认位置并创建','Confirm location and create'],
     'projects.creating': ['正在创建…','Creating…'], 'projects.creatingConversation': ['正在创建对话…','Creating conversation…'],
     'projects.locationChanged': ['实际位置已更新，请核对后再次确认。','The resolved location changed. Review it and confirm again.'],
-    'projects.status.done': ['可对话','Ready to chat'], 'projects.status.failed': ['任务失败','Task failed'], 'projects.status.queued': ['排队中','Queued'], 'projects.status.active': ['进行中','In progress'],
+    'projects.status.done': ['可对话','Ready to chat'], 'projects.status.failed': ['任务失败','Task failed'], 'projects.status.queued': ['排队中','Queued'], 'projects.status.active': ['进行中','In progress'], 'projects.status.stopped': ['已停止','Stopped'], 'projects.status.stopping': ['正在停止','Stopping'],
     'projects.close': ['关闭项目管理','Close projects'], 'projects.createSuccess': ['项目已创建，文件夹位置已确认。','Project created with its confirmed folder.'],
   }
   for (const [key, [zh, en]] of Object.entries(messages)) { I.zh[key] = zh; I.en[key] = en }

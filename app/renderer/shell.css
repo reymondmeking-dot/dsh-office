@@ -1,0 +1,97 @@
+/* Task-first shell: stable navigation, quiet controls, generous working surfaces. */
+:root { --titlebar-height: 112px; --text-body: 14px; --text-title: 20px; --surface-page: #f4f6f9; --shadow-menu: 0 12px 32px rgba(20,34,56,.18); }
+.titlebar-main { height: 58px; padding-inline: var(--space-6); gap: var(--space-8); }
+.titlebar-workspace { height: 53px; padding-inline: var(--space-6); background: var(--surface); gap: var(--space-8); }
+.window-identity { gap: var(--space-6); }
+.titlebar-actions { gap: var(--space-2); }
+#titlebar .workspace-nav { gap: var(--space-2); }
+#titlebar .workspace-nav-btn { min-height: 38px; padding-inline: var(--space-4); }
+#titlebar .workspace-nav-btn.is-active { background: var(--blue-soft); border-color: transparent; }
+#titlebar .office-controls { flex: 1; }
+.more-trigger { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); }
+.more-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.pill-btn { min-height: 38px; padding-inline: var(--space-4); border-color: var(--line); background: var(--surface); font-weight: 550; }
+.pill-btn:hover { background: var(--surface-hover); box-shadow: none; }
+.pill-btn:active { transform: translateY(1px); }
+.pill-btn:disabled { opacity: .48; box-shadow: none; transform: none; }
+.pill-btn.danger { color: var(--danger); border-color: #e5b6b2; background: var(--surface); }
+.pill-btn.danger:hover:enabled { background: var(--danger-soft); }
+.pill-btn.danger:disabled { color: var(--sub); border-color: var(--line); }
+.action-menu { position: fixed; inset: auto; margin: 0; width: max-content; min-width: 192px; max-width: min(440px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: var(--space-2); border: 0; border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: var(--shadow-menu); z-index: 220; -webkit-app-region: no-drag; }
+.action-menu::backdrop { background: transparent; }
+.menu-item { display: flex; align-items: center; width: 100%; min-height: 40px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font: inherit; font-size: var(--text-body); white-space: nowrap; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-muted); }
+.menu-item:disabled { opacity: .45; }
+.menu-item.danger { color: var(--danger); }
+.work-mode-menu { width: 416px; padding: var(--space-5); display: grid; grid-template-columns: minmax(0,1fr) auto; gap: var(--space-4); }
+.work-mode-heading { grid-column: 1 / -1; display: grid; gap: var(--space-2); }
+.work-mode-heading strong { font-size: var(--text-subhead); }
+#titlebar #work-mode-menu #fruit-tray { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; max-width: 100%; width: 100%; gap: var(--space-2); }
+#titlebar #work-mode-menu #fruits { flex-wrap: wrap; overflow: visible; gap: var(--space-2); }
+#titlebar #work-mode-menu .tray-label { display: block; }
+#titlebar #work-mode-menu .fruit { width: 36px; height: 36px; }
+#titlebar #work-mode-menu #effort-pill { background: var(--surface-muted); }
+#titlebar #work-mode-menu #effort-pill select { min-height: 38px; }
+.sheet { gap: var(--space-5); background: var(--surface); padding: var(--space-7); }
+.sheet.wide { width: min(1240px, calc(100vw - 64px)); height: calc(100vh - 64px); max-height: 900px; }
+.sheet-head { min-height: 38px; padding-bottom: var(--space-4); border-bottom: 1px solid var(--line); }
+.sheet-head .h1 { font-size: var(--text-title); }
+.sheet-head .x { width: 34px; height: 34px; }
+.sheet-foot { gap: var(--space-3); margin-top: 0; }
+.sheet .sec-title { font-size: var(--text-subhead); }
+.sheet .group { padding: 0; border-radius: 0; background: transparent; }
+.sheet .group > .sec-title { margin-top: 0; margin-bottom: var(--space-4); }
+.grid2 { column-gap: var(--space-6); row-gap: var(--space-4); }
+.settings-body { gap: var(--space-6); }
+.settings-layout { display: grid; grid-template-columns: 192px minmax(0,1fr); flex: 1; min-height: 0; gap: var(--space-7); }
+#settings-modal > .sheet { overflow: hidden; }
+#settings-modal .settings-jumps { display: flex; flex-direction: column; flex-wrap: nowrap; gap: var(--space-1); padding: 0 var(--space-4) 0 0; margin: 0; border: 0; border-right: 1px solid var(--line); overflow: auto; }
+#settings-modal .settings-jumps .pill-btn { text-align: left; padding: var(--space-2-5) var(--space-3); min-height: 40px; border: 0; white-space: normal; line-height: 1.4; flex: none; }
+#settings-modal .settings-jumps .pill-btn.is-active { color: var(--blue); background: var(--blue-soft); }
+#settings-modal .settings-body { padding: var(--space-1) var(--space-2) var(--space-6) 0; }
+#settings-modal .settings-body > .group { flex: none; }
+#settings-modal .sheet-foot { min-height: 54px; }
+#settings-modal .group > .row { flex-wrap: wrap; }
+#settings-modal .group > .row > .sec-title { margin: 0; }
+#settings-modal .group > .row + .hint { margin: var(--space-3) 0 var(--space-5); }
+#cli-settings #cli-list { max-height: none; }
+.cli-custom-row { display: grid; grid-template-columns: 140px minmax(0,1fr) auto; margin-top: var(--space-5); }
+.ext-tabs { gap: var(--space-3); padding-bottom: 0; border: 0; }
+.ext-tabs .pill-btn { min-height: 38px; }
+.ext-tabs .pill-btn.on { background: var(--blue-soft); border-color: transparent; }
+.ext-card, .ex-card { padding: var(--space-5); background: var(--surface-page); }
+.ext-pane .group > .hint { max-width: 78ch; }
+.ext-pane .group > .row { gap: var(--space-3); }
+.chat-sheet .sheet-head { flex-wrap: nowrap; }
+#chat-title { white-space: nowrap; font-size: var(--text-title); }
+#chat-proj { max-width: 300px; width: 30%; }
+.chat-context-bar { display: grid; grid-template-columns: auto minmax(140px,260px) auto minmax(0,1fr); gap: var(--space-3); align-items: center; padding: 0; border: 0; background: transparent; }
+#chat-location { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sub); text-align: right; }
+.chat-main { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: var(--space-6); }
+.chat-col { min-width: 0; }
+#chat-log { background: var(--surface-page); border-radius: var(--radius-card); padding: var(--space-5); }
+.chat-side { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: 0 0 0 var(--space-5); }
+.chat-input { padding-top: var(--space-3); }
+.chat-input textarea { min-height: 72px; resize: none; }
+.chat-input > button { align-self: end; }
+.browser-sheet { padding: 0; gap: 0; }
+.browser-sheet .sheet-head { padding: var(--space-4) var(--space-5); border: 0; }
+.browser-toolbar .pill-btn { flex: none; }
+.browser-tabbar { padding-inline: var(--space-5); }
+#file-content { padding-inline: var(--space-6); }
+#file-content > * { max-width: 80ch; }
+.vault-body { padding: 0; }
+.about-content { padding: var(--space-4) 0; }
+@media (max-width: 1300px) {
+  .titlebar-main, .titlebar-workspace { padding-inline: var(--space-5); gap: var(--space-5); }
+  .sheet, .sheet.wide { padding: var(--space-5); }
+  .browser-sheet { padding: 0; }
+  .settings-layout { grid-template-columns: 172px minmax(0,1fr); gap: var(--space-5); }
+  .chat-main { grid-template-columns: minmax(0,1fr) 248px; gap: var(--space-4); }
+  #chat-proj { max-width: 240px; }
+  #chat-title { font-size: var(--text-title); }
+  .chat-context-bar { grid-template-columns: auto minmax(100px,1fr) auto; }
+  #chat-location { grid-column: 1 / -1; text-align: left; }
+}
+@media (max-width: 1000px) { .settings-layout { grid-template-columns: 152px minmax(0,1fr); } .chat-main { grid-template-columns: minmax(0,1fr) 220px; } #titlebar .workspace-nav-btn { padding-inline: var(--space-2); } .titlebar-main { gap: var(--space-3); } }
+@media (max-height: 840px) { .sheet.wide { height: calc(100vh - 40px); max-height: calc(100vh - 40px); } .sheet { gap: var(--space-4); } .sheet-head { padding-bottom: var(--space-3); } #settings-modal .settings-jumps .pill-btn { min-height: 36px; } }

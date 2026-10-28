@@ -10,6 +10,7 @@ const crypto = require('node:crypto')
 const parameters = require('./parameters.js')
 const { CodexRuntime } = require('./codex.cjs')
 const extensions = require('./extensions.cjs')
+const { terminateTree, ProjectStoppedError } = require('./project-runs.cjs')
 /**
  * Live extensions for a settings snapshot (user plugins: $DSH_OFFICE_PLUGIN_DIR,
  * user skills: $DSH_OFFICE_SKILL_DIR, both set by main.cjs). With stage, the live
@@ -187,6 +188,7 @@ class Runtime {
       env.HTTPS_PROXY = env.HTTP_PROXY = `http://127.0.0.1:${settings.proxyPort}`
       env.NO_PROXY = 'localhost,127.0.0.1,::1,deepseek.com'
     }
+    if (this.closing) throw new ProjectStoppedError()
     fs.mkdirSync(settings.workspace, { recursive: true })
     // MCP clients are runtime-scoped in DSH, so employee sessions get their own
     // runtime and trusted environment. Warm runtimes omit the browser bridge.
@@ -198,7 +200,7 @@ class Runtime {
       + Object.entries(parameters.normalizeCompaction(settings.compaction)).map(([key, value]) => `    ${key}: ${JSON.stringify(value)}\n`).join('')
     if (this.browserContext) fs.writeFileSync(this.patchPath, compaction + extensions.dshSkillPatch(this.pool.ext.skillDirs || []) + extensions.dshMcpPatch(live, this.browserContext.projectDir) + ENV_ROW)
     this.proc = spawn(this.pool.node, [bin, '--profile', 'office', '--patch', this.patchPath], {
-      cwd: dshRoot, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: dshRoot, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
     })
     this.proc.stdout.setEncoding('utf8')
     this.proc.stdout.on('data', d => this.onData(d))
@@ -257,6 +259,7 @@ class Runtime {
   /** Queue a prompt on a session and resolve with the final assistant text once the session idles. */
   async run(sessionId, text, onEvent) {
     await this.ready
+    if (this.closing) throw new ProjectStoppedError()
     return new Promise((resolve, reject) => {
       let messageId; let received = false; let last = ''; const early = []
       const handle = (method, params) => {
@@ -286,11 +289,13 @@ class Runtime {
   }
 
   async close() {
-    if (this.dead) return
-    try { await Promise.race([this.request('shutdown', {}), new Promise(r => setTimeout(r, 1500))]) } catch {}
-    try { this.proc.stdin.end() } catch {}
-    setTimeout(() => { try { this.proc.kill() } catch {} }, 1500)
-    if (this.browserContext && this.patchPath) { try { fs.unlinkSync(this.patchPath) } catch {} }
+    if (this.closePromise) return this.closePromise
+    this.closing = true
+    this.closePromise = (async () => {
+      await terminateTree(this.proc)
+      if (this.browserContext && this.patchPath) { try { fs.unlinkSync(this.patchPath) } catch {} }
+    })()
+    return this.closePromise
   }
 }
 
@@ -343,10 +348,16 @@ class RuntimePool {
     return rt
   }
   async releaseSession(sessionId) {
+    this.releases ||= new Map()
+    if (this.releases.has(sessionId)) return this.releases.get(sessionId)
     const contexts = [...this.runtimes.entries()].filter(([, r]) => r.browserContext?.id === sessionId)
     for (const [key] of contexts) this.runtimes.delete(key)
-    await Promise.all(contexts.map(([, r]) => r.close()))
-    await releaseBrowser(sessionId)
+    const release = (async () => {
+      await Promise.all(contexts.map(([, r]) => r.close()))
+      await releaseBrowser(sessionId)
+    })()
+    this.releases.set(sessionId, release)
+    try { await release } finally { this.releases.delete(sessionId) }
   }
   async closeAll() {
     const values = [...this.runtimes.values()]; this.runtimes.clear()

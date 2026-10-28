@@ -6,6 +6,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const crypto = require('node:crypto')
+const { RunScope, isStopped, containsProject } = require('./project-runs.cjs')
 const { RuntimePool } = require('./runtime.cjs')
 const parameters = require('./parameters.js')
 const prov = require('./providers.cjs')
@@ -223,36 +224,41 @@ function toolLabel(name, args) {
 
 /** Model, network and runtime hiccups worth retrying; logic errors are not. */
 const TRANSIENT = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network|timed? ?out|\b(429|500|502|503|504|529)\b|rate.?limit|overloaded|temporarily|unavailable|runtime exited/i
-async function runAgent(a, sessionTag, prompt, rush) {
+async function runAgent(a, sessionTag, prompt, rush, scope) {
   const retries = Math.max(0, Math.min(5, Number(settings.autopilot?.retries ?? 2)))
   for (let attempt = 0; ; attempt++) {
+    scope.check()
     try {
       return await runAgentOnce(a, sessionTag, attempt ? prompt + L(
         `\n\n（上一次执行因网络或模型故障中断（第 ${attempt} 次重试）。先检查已经写好的文件，再接着完成，不要从头重做。）`,
-        `\n\n(The previous attempt was interrupted by a network or model failure; retry ${attempt}. Check files already written and continue from there instead of starting over.)`) : prompt, rush)
+        `\n\n(The previous attempt was interrupted by a network or model failure; retry ${attempt}. Check files already written and continue from there instead of starting over.)`) : prompt, rush, scope)
     } catch (err) {
+      scope.check()
       const msg = String(err?.message || err)
       if (attempt >= retries || !TRANSIENT.test(msg)) throw err
       const wait = Math.min(60000, 3000 * 3 ** attempt)
       log(`agent ${a.id} ${sessionTag} transient failure, retry ${attempt + 1}/${retries} in ${wait}ms: ${msg.slice(0, 200)}`)
       setAgent(a.id, { activity: L(`网络/模型故障，${Math.round(wait / 1000)} 秒后自动重试`, `Network/model hiccup, retrying in ${Math.round(wait / 1000)}s`) })
-      await sleep(wait)
+      await scope.delay(wait)
     }
   }
 }
 
-async function runAgentOnce(a, sessionTag, prompt, rush) {
+async function runAgentOnce(a, sessionTag, prompt, rush, scope) {
+  scope.check()
   const sessionId = `${a.id}-${sessionTag}-${crypto.randomBytes(4).toString('hex')}`
-  const context = { id: sessionId, projectDir: current?.dir || settings.workspace, owner: shownName(a) }
+  const context = { id: sessionId, projectDir: scope.project.dir, owner: shownName(a) }
   const rt = pool.get(modelOf(a), rush, effortOf(a), context)
-  try { return await rt.run(sessionId, prompt, ev => {
+  const untrack = scope.addCleanup(() => pool.releaseSession(sessionId))
+  try { return await scope.wait(rt.run(sessionId, prompt, ev => {
+    if (scope.stopped) return
     if (ev.type === 'tool/call') {
       if (/^mcp__/.test(ev.data.name || '')) log(`mcp ${a.name} ${ev.data.name}`)
       if (ev.data.name === 'skill') log(`skill ${a.name} ${String(ev.data.arguments || '').slice(0, 120)}`)
       setAgent(a.id, { activity: toolLabel(ev.data.name, ev.data.arguments) })
     }
     else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('typing', { id: a.id })
-  }) } finally { await pool.releaseSession?.(sessionId) }
+  })) } finally { await pool.releaseSession?.(sessionId); untrack() }
 }
 
 function parseJson(text) {
@@ -270,10 +276,10 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
 }
 const projectFile = dir => path.join(dir, '.office', 'project.json')
-function saveProject(p) { writeJson(projectFile(p.dir), p) }
+function saveProject(p) { const { activity, ...stored } = p; writeJson(projectFile(p.dir), stored) }
 
 function listProjects() {
-  return projectStorage().list()
+  return projectStorage().list().map(p => ({ ...p, activity: projectActivity(p) }))
 }
 let projectStore
 function projectStorage() { return projectStore ||= new (require('./projects.cjs').ProjectStore)({ getWorkspace: () => settings.workspace }) }
@@ -302,6 +308,45 @@ function listFiles(dir) {
 
 const queue = []
 let current = null
+let taskScope = null
+const chatScopes = new Map()
+function projectActivity(p) {
+  const queuedTasks = queue.filter(q => containsProject(p, q)).length
+  const runningTasks = current && containsProject(p, current) ? 1 : 0
+  const chats = [...chatScopes.values()].filter(s => containsProject(p, s.project))
+  const stopping = !!(runningTasks && taskScope?.stopped) || chats.some(s => s.stopped)
+  const chatCount = chats.length
+  return { runningTasks, queuedTasks, chatCount, stopping, canStop: !!(runningTasks || queuedTasks || chatCount) && !stopping }
+}
+function emitActivity() { emit('project-activity', { projects: listProjects() }) }
+function markStopped(p) {
+  p.status = 'stopped'; p.phase = L('已停止，已保留现有文件', 'Stopped; existing files kept'); p.stoppedAt = Date.now()
+  saveProject(p); emit('project', { project: { ...p, activity: projectActivity(p) } })
+}
+async function stopProject(id) {
+  const p = listProjects().find(x => x.id === id)
+  if (!p) throw new Error(T('err.chatNoProject'))
+  const stopped = [], chats = [], scopes = []
+  // Remove queued work before aborting a running task, so pump cannot start a sibling child.
+  for (let i = queue.length - 1; i >= 0; i--) if (containsProject(p, queue[i])) {
+    const [q] = queue.splice(i, 1); markStopped(q); stopped.push(q.id)
+  }
+  if (current && containsProject(p, current) && taskScope) {
+    stopped.push(current.id); scopes.push(taskScope)
+    current.status = 'stopping'; current.phase = L('正在停止…', 'Stopping…'); current.stopRequestedAt = Date.now()
+    saveProject(current); emit('project', { project: current })
+    if (pendingAsk?.project === current.id) {
+      const ask = pendingAsk; pendingAsk = null; ask.resolve(null)
+      emit('ask-done', { project: current.id, skipped: true, stopped: true })
+    }
+  }
+  for (const [chatId, scope] of chatScopes) if (containsProject(p, scope.project)) { scopes.push(scope); chats.push(chatId) }
+  const cleanup = scopes.map(s => s.stop())
+  emitActivity()
+  await Promise.all(cleanup)
+  await Promise.all(scopes.map(s => s.finished))
+  return { id, stopped, chats, activity: projectActivity(p) }
+}
 
 // plain recursive copy (fs.cpSync crashed the Electron main process)
 async function copyDir(from, to) {
@@ -352,6 +397,7 @@ async function submitTask(input) {
   projectStorage().register(dir)
   queue.push(p)
   emit('project', { project: p })
+  emitActivity()
   if (input.rush && !state.rush) setRush(true)
   pump()
   return p
@@ -359,8 +405,18 @@ async function submitTask(input) {
 
 async function pump() {
   if (current || !queue.length) return
-  current = queue.shift()
-  try { await runProject(current) } catch (err) {
+  const p = current = queue.shift()
+  const scope = taskScope = new RunScope(p)
+  emitActivity()
+  try { await runProject(p, scope) } catch (err) {
+    if (scope.stopped || isStopped(err)) {
+      await scope.stop()
+      markStopped(p)
+      emit('meeting-end', { ids: state.agents.map(a => a.id) })
+      for (const a of state.agents) if (a.role !== 'employee' || a.project === p.id) setAgent(a.id, { status: 'idle', activity: L('项目已停止', 'Project stopped') })
+      log(`project ${p.id} stopped by user`)
+      return
+    }
     log(`project ${current.id} failed: ${err.stack || err}`)
     current.status = 'failed'; current.phase = `失败：${String(err.message || err).slice(0, 120)}`
     saveProject(current); emit('project', { project: current })
@@ -368,16 +424,23 @@ async function pump() {
     setAgent('ceo', { status: 'idle', activity: T('act.projectFailed') })
     notify(L('项目失败', 'Project failed'), `${current.title}: ${String(err.message || err).slice(0, 140)}`)
   } finally {
-    current = null
+    current = null; taskScope = null
+    scope.finish()
+    emitActivity()
     pump()
   }
 }
 
 function phase(p, status, text) {
+  if (taskScope?.project === p) taskScope.check()
   p.status = status; p.phase = text; saveProject(p); emit('project', { project: p })
 }
 
-async function runProject(p) {
+async function runProject(p, scope) {
+  const sleep = ms => scope.delay(ms)
+  const pace = ms => sleep(state.rush ? ms / 3 : ms)
+  const run = (a, tag, prompt, rush) => runAgent(a, tag, prompt, rush, scope)
+  scope.check()
   const vars = { projectDir: p.dir, projectRel: p.rel }
   const rush = () => state.rush || p.rush
   const rushNote = () => rush() ? L('\n\n【加急项目】老板要求加急：全员快速模式，抓重点，尽快交付可用成果。', '\n\n[RUSH] The boss wants this fast: everyone in quick mode, focus on what matters, ship something usable as soon as possible.') : ''
@@ -446,17 +509,18 @@ If key information in the task is unclear, would clearly change the outcome, and
 - 不需要提问时，直接输出目标 JSON。`
   let goal
   try {
-    let out = parseJson(await runAgent(agent('ceo'), 'goal', goalPrompt + (settings.ceoAsk === false ? '' : askRule), rush()))
+    let out = parseJson(await run(agent('ceo'), 'goal', goalPrompt + (settings.ceoAsk === false ? '' : askRule), rush()))
     const qs = [].concat(out.questions || []).map(q => typeof q === 'string' ? { q } : q).filter(q => q && q.q).slice(0, 3)
     if (!out.goal && qs.length) {
       phase(p, 'asking', 'CEO 在向老板提问')
       setAgent('ceo', { status: 'idle', activity: T('act.asking', { n: qs.length }) })
       const answers = await askUser(p, qs.map(q => ({ q: String(q.q), options: [].concat(q.options || []).map(String).slice(0, 5) })))
+      scope.check()
       p.qa = qs.map((q, i) => ({ q: String(q.q), a: String(answers?.[i] || '').trim() })); saveProject(p)
       emit('say', { id: 'ceo', text: answers ? T('say.thanks') : T('say.assume'), ms: 2500 })
       setAgent('ceo', { status: 'busy', activity: T('act.makingGoal') })
       phase(p, 'goal', 'CEO 制定目标')
-      out = parseJson(await runAgent(agent('ceo'), 'goal2', EN() ? `${harness('ceo', vars)}
+      out = parseJson(await run(agent('ceo'), 'goal2', EN() ? `${harness('ceo', vars)}
 
 ## Now: set the goal
 The boss's task:
@@ -476,7 +540,7 @@ ${goalJson}`, rush()))
     }
     goal = out
     if (!goal.goal) throw new Error('empty goal')
-  } catch (err) {
+  } catch (err) { scope.check();
     log(`CEO goal fallback: ${err}`)
     goal = EN()
       ? { goal: `${p.title}: ${p.brief || ''}`, scope: [], acceptance: ['All deliverable files are present and usable as is'], toHr: 'Please hire and split the work for this task.' }
@@ -526,11 +590,11 @@ ${expertNote()}请招人并分工排期。输出格式（严格 JSON）：
   let team, hrPlan = {}
   const hrStart = Date.now()
   try {
-    hrPlan = parseJson(await runAgent(agent('hr'), 'hire', hrPrompt, rush()))
+    hrPlan = parseJson(await run(agent('hr'), 'hire', hrPrompt, rush()))
     team = (hrPlan.team || []).slice(0, settings.maxTeam)
     if (!team.length) throw new Error('empty team')
     if (hrPlan.note) emit('say', { id: 'hr', text: hrPlan.note, ms: 5000 })
-  } catch (err) {
+  } catch (err) { scope.check();
     log(`HR fallback: ${err}`)
     team = EN() ? [
       { name: 'Ivy', title: 'Researcher', skills: 'research, analysis', task: `Research and analyse "${p.title}"`, deliverable: '01-research.md', after: [] },
@@ -688,7 +752,7 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
 
 请直接开始工作，把成果写入 ${p.rel}/${h.deliverable}。`
       let report, ok = true
-      try { report = await runAgent(h, round ? `rework${round}` : 'work', prompt, rush()) } catch (err) { ok = false; report = L(`状态：受阻\n出错了：`, `Status: blocked\nError: `) + String(err.message || err).slice(0, 300) }
+      try { report = await run(h, round ? `rework${round}` : 'work', prompt, rush()) } catch (err) { scope.check(); ok = false; report = L(`状态：受阻\n出错了：`, `Status: blocked\nError: `) + String(err.message || err).slice(0, 300) }
       report = (report || L('状态：完成\n已完成。', 'Status: done\nDone.')).trim()
       // Office checks the promised file itself so HR reviews facts, not claims.
       if (ok && !fs.existsSync(path.join(p.dir, h.deliverable))) report += L(`\n\n【Office 检查】主交付文件 ${p.rel}/${h.deliverable} 不存在。`, `\n\n[Office check] The main deliverable ${p.rel}/${h.deliverable} does not exist.`)
@@ -700,8 +764,8 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
       setAgent('hr', { status: 'busy', activity: T('act.hrReviewing', { name: h.name }) })
       let verdict
       try {
-        verdict = parseJson(await runAgent(agent('hr'), `review-${h.name}-${round}`, reviewPrompt(h, rec, round), rush()))
-      } catch (err) { log(`HR review fallback: ${err}`); verdict = { pass: true, comment: L('（审核失败，默认通过）', '(review failed, passed by default)') } }
+        verdict = parseJson(await run(agent('hr'), `review-${h.name}-${round}`, reviewPrompt(h, rec, round), rush()))
+      } catch (err) { scope.check(); log(`HR review fallback: ${err}`); verdict = { pass: true, comment: L('（审核失败，默认通过）', '(review failed, passed by default)') } }
       const pass = verdict.pass !== false || round >= MAX_REWORK
       rec.review = { pass, comment: String(verdict.comment || '') }
       p.reports.push(rec); saveProject(p)
@@ -721,11 +785,13 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
   await new Promise(resolve => {
     const running = new Set(), started = new Set()
     const next = () => {
+      if (scope.stopped) { if (!running.size) resolve(); return }
       for (const h of hires) {
         if (running.size >= limit()) break
         if (started.has(h.id) || !h.deps.every(d => approved.has(d))) continue
         started.add(h.id)
         const job = work(h).catch(err => {
+          if (scope.stopped || isStopped(err)) return
           log(`work ${h.id} crashed: ${err.stack || err}`)
           approved.set(h.id, { id: h.id, name: h.name, title: h.title, ok: false, status: 'blocked', report: L('流程异常', 'Workflow error'), deliverable: h.deliverable })
         }).finally(() => { running.delete(job); next() })
@@ -735,6 +801,7 @@ ${h.task}${handoff(h)}${feedback ? `\n\n## HR 退回意见（请据此返工，�
     }
     next()
   })
+  scope.check()
 
   // 5. CEO acceptance
   phase(p, 'integrating', 'CEO 验收成果')
@@ -778,7 +845,7 @@ ${finals.map(r => `### ${r.name}（${r.title}）· ${tag(r.status)}${r.review ? 
 2. 写出 ${p.rel}/00-项目总结.md：项目目标、团队与分工、每份成果的要点与文件链接、验收结论（逐条标注达标/未达标）、遗留问题与后续建议。
 3. 最后一条回复用 3 句话向老板汇报，第一句写验收结论。`
   let summary
-  try { summary = await runAgent(agent('ceo'), 'final', finalPrompt, rush()) } catch (err) { summary = L('验收失败：', 'Acceptance failed: ') + (err.message || err) }
+  try { summary = await run(agent('ceo'), 'final', finalPrompt, rush()) } catch (err) { scope.check(); summary = L('验收失败：', 'Acceptance failed: ') + (err.message || err) }
   p.summary = (summary || '').trim()
   emit('say', { id: 'ceo', text: p.summary.slice(0, 80) || T('say.done'), ms: 6000 })
   setAgent('ceo', { status: 'busy', activity: T('act.archiving') })
@@ -897,13 +964,17 @@ async function chatSend(id, input, conversationId = 'default') {
   if (!text) throw new Error(T('err.chatEmpty'))
   const p = listProjects().find(x => x.id === id)
   if (!p) throw new Error(T('err.chatNoProject'))
-  if (!['done', 'failed'].includes(p.status)) throw new Error(T('err.chatNotReady'))
+  if (!['done', 'failed', 'stopped'].includes(p.status)) throw new Error(T('err.chatNotReady'))
   if (!settings.models?.length) throw new Error(NO_MODEL_MSG())
   if (chatBusy.has(id)) throw new Error(T('err.chatBusy'))
   chatBusy.add(id)
   const ceo = agent('ceo')
   const solo = !current // do not touch the CEO's office status while a project is running
   const sid = `ceo-chat-${id}-${crypto.randomBytes(5).toString('hex')}`
+  const scope = new RunScope(p)
+  chatScopes.set(id, scope)
+  scope.addCleanup(() => pool.releaseSession(sid))
+  emitActivity()
   try {
     const history = readChat(p, conversationId)
     history.push({ role: 'user', text, at: Date.now() })
@@ -917,13 +988,15 @@ async function chatSend(id, input, conversationId = 'default') {
     const before = sig(listFiles(p.dir))
     if (solo) setAgent('ceo', { status: 'busy', activity: T('act.chatting') })
     emit('chat-status', { project: id, text: T('chat.thinking', { name: ceo?.name || 'CEO' }) })
-    const out = await rt.run(sid, prompt, ev => {
+    const out = await scope.wait(rt.run(sid, prompt, ev => {
+      if (scope.stopped) return
       if (ev.type === 'tool/call') {
         if (/^mcp__/.test(ev.data.name || '')) log(`mcp ${ceo.name} ${ev.data.name}`)
         emit('chat-status', { project: id, text: toolLabel(ev.data.name, ev.data.arguments) })
       }
       else if (ev.type === 'assistant/attempt' || ev.type === 'step/start') emit('chat-status', { project: id, text: T('chat.thinking', { name: ceo?.name || 'CEO' }) })
-    })
+    }))
+    scope.check()
     const reply = (out || '').trim() || T('chat.noReply')
     const after = listFiles(p.dir)
     const files = []
@@ -939,13 +1012,20 @@ async function chatSend(id, input, conversationId = 'default') {
     if (solo) emit('say', { id: 'ceo', text: reply.slice(0, 60), ms: 4000 })
     return { message, products: productsOf(p) }
   } catch (err) {
+    if (scope.stopped || isStopped(err)) {
+      log(`chat ${id} stopped by user`)
+      return { stopped: true, products: productsOf(p) }
+    }
     log(`chat ${id} failed: ${err.stack || err}`)
     throw err
   } finally {
     await pool.releaseSession?.(sid)
+    chatScopes.delete(id)
     chatBusy.delete(id)
+    scope.finish()
     emit('chat-status', { project: id, text: '' })
-    if (solo && !current) setAgent('ceo', { status: 'idle', activity: T('act.chatDone') })
+    if (solo && !current) setAgent('ceo', { status: 'idle', activity: scope.stopped ? L('对话已停止', 'Conversation stopped') : T('act.chatDone') })
+    emitActivity()
   }
 }
 
@@ -962,6 +1042,14 @@ ipcMain.handle('office:chatHistory', (_e, id, conversationId = 'default') => {
   return { id: p.id, title: p.title, dir: p.dir, conversationId, conversations: projectStorage().conversations(p), references: projectStorage().references(p, conversationId), status: p.status, messages, products: productsOf(p), busy: chatBusy.has(id) }
 })
 ipcMain.handle('office:chatSend', (_e, id, text, conversationId) => chatSend(id, text, conversationId))
+ipcMain.handle('office:stopProject', (_e, id) => stopProject(id))
+ipcMain.handle('office:projectActivity', (_e, id) => {
+  const projects = listProjects()
+  if (!id) return projects.map(p => ({ id: p.id, ...p.activity }))
+  const p = projects.find(p => p.id === id)
+  if (!p) throw new Error(T('err.chatNoProject'))
+  return p.activity
+})
 const projectById = id => { const p = listProjects().find(p => p.id === id); if (!p) throw new Error(T('err.chatNoProject')); return p }
 ipcMain.handle('office:taskLocation', (_e, input) => planTask(input))
 ipcMain.handle('office:projectPreview', (_e, input) => projectStorage().preview(input))
@@ -1379,7 +1467,10 @@ app.whenReady().then(async () => {
   initPool()
   // Projects interrupted by a previous exit: re-queue them (hands-free) or mark them failed.
   const resumable = []
-  for (const p of listProjects()) if (!['done', 'failed'].includes(p.status) && fs.existsSync(projectFile(p.dir))) {
+  for (const p of listProjects()) if (p.status === 'stopping') {
+    // An explicit stop survives a crash during teardown; never turn it into an automatic retry.
+    p.status = 'stopped'; p.phase = L('已停止，已保留现有文件', 'Stopped; existing files kept'); p.stoppedAt ||= Date.now(); saveProject(p)
+  } else if (!['done', 'failed', 'stopped'].includes(p.status) && fs.existsSync(projectFile(p.dir))) {
     const saved = readJson(projectFile(p.dir), null)
     if (saved && settings.autopilot?.resume !== false && settings.models.length && (saved.resumes || 0) < 2) resumable.push(saved)
     else { const x = saved || p; x.status = 'failed'; x.phase = '应用退出时中断'; saveProject(x) }
@@ -1392,7 +1483,7 @@ app.whenReady().then(async () => {
   }
   if (queue.length) setTimeout(pump, 4000)
   win = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 1100, minHeight: 680, frame: false, backgroundColor: '#1d1f27',
+    width: 1440, height: 900, minWidth: 1100, minHeight: 680, frame: false, backgroundColor: '#f4f6f9',
     title: 'DSH Office', icon: process.platform === 'win32' ? path.join(__dirname, 'icon.ico') : path.join(__dirname, 'icon.png'), show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: false },
   })

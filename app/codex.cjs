@@ -6,6 +6,7 @@ const { spawn, execFile, execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
+const { terminateTree, ProjectStoppedError } = require('./project-runs.cjs')
 
 const WIN = process.platform === 'win32'
 const codexHome = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
@@ -135,6 +136,7 @@ class CodexRuntime {
   }
 
   run(sessionId, text, onEvent) {
+    if (this.dead) return Promise.reject(new ProjectStoppedError())
     const { settings } = this.pool
     const launch = findCodex({ codexPath: settings.codexPath, node: this.pool.node })
     if (!launch) return Promise.reject(new Error(require('./renderer/i18n.js').t('err.codexMissing')))
@@ -144,7 +146,7 @@ class CodexRuntime {
       const resumeId = this.threads.get(threadKey)
       const rt = require('./runtime.cjs')
       const env = rt.injectEnv(rt.browserEnv(cleanEnv(), this.browserContext), this.pool.envFor ? this.pool.envFor('codex') : {})
-      const proc = spawn(launch.cmd, [...launch.prefix, ...this.args(resumeId)], { cwd: this.browserContext?.projectDir || settings.workspace, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      const proc = spawn(launch.cmd, [...launch.prefix, ...this.args(resumeId)], { cwd: this.browserContext?.projectDir || settings.workspace, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })
       this.children.add(proc)
       let buf = '', last = '', failed = '', done = false, tail = ''
       const emit = ev => { try { onEvent?.(ev) } catch {} }
@@ -177,6 +179,7 @@ class CodexRuntime {
       const finish = fn => { if (done) return; done = true; this.children.delete(proc); fn() }
       proc.on('error', err => finish(() => reject(err)))
       proc.on('close', code => finish(() => {
+        if (this.dead) return reject(new ProjectStoppedError())
         if (buf.trim()) line(buf)
         if (failed) return reject(new Error(failed))
         if (code !== 0 && !last) return reject(new Error(`codex exited ${code}: ${tail.split('\n').filter(Boolean).slice(-3).join(' | ')}`))
@@ -188,9 +191,10 @@ class CodexRuntime {
   }
 
   async close() {
+    if (this.closePromise) return this.closePromise
     this.dead = true
-    for (const p of this.children) { try { p.kill() } catch {} }
-    this.children.clear()
+    this.closePromise = Promise.all([...this.children].map(terminateTree)).then(() => this.children.clear())
+    return this.closePromise
   }
 }
 

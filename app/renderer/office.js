@@ -874,7 +874,7 @@ window.Office = (() => {
           R(ctx, b.x, b.y + (5 - bh), 2, bh, b.color)
           R(ctx, b.x, b.y + (5 - bh) + 1, 2, 0.5, 'rgba(255,255,255,0.6)'); R(ctx, b.x, b.y + 3.5, 2, 0.5, 'rgba(255,255,255,0.4)')
           R(ctx, b.x + 1.5, b.y + (5 - bh), 0.5, bh, 'rgba(0,0,0,0.2)')
-          if (b.status !== 'done') R(ctx, b.x + 0.5, b.y + (5 - bh) - 1.5, 1, 1, b.status === 'failed' ? '#ff4d4d' : (Math.floor(time * 3) % 2 ? '#ffd93d' : '#ffb300'))
+          if (b.status !== 'done') R(ctx, b.x + 0.5, b.y + (5 - bh) - 1.5, 1, 1, b.status === 'stopped' ? '#8b929e' : b.status === 'failed' ? '#ff4d4d' : (Math.floor(time * 3) % 2 ? '#ffd93d' : '#ffb300'))
         }
         break
       }
